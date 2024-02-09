@@ -27,8 +27,7 @@ Not supported:
  * SWD protocol version 2 (multi-drop support, etc.)
 
 Details:
-http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.ihi0031c/index.html
-(Registration required)
+https://developer.arm.com/documentation/ihi0031/latest/
 '''
 
 from .pd import Decoder
