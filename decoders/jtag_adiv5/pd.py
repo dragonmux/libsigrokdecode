@@ -152,20 +152,27 @@ class Decoder(srd.Decoder):
 		NB: both the IR and DR shift states produce both TDI and TDO data tuples, it's on us to determine
 		which of the two holds any actually useful data.
 		'''
-		self.beginSample, self.endSample = beginSample, endSample
+		self.beginSample = beginSample
+		self.endSample = endSample
 		action, value = data
 
+		# If this is a state change message, figure out if we care
 		if action == 'NEW STATE':
+			assert isinstance(value, str)
 			self.handleStateChange(value)
 
 	def handleStateChange(self, state: str):
 		'''Takes a new state transition from the JTAG decoder and picks out DR and IR shift states to arm
 		the ADIv5 decoders for new data/instructions
 		'''
-		if state == 'TEST-LOGIC_RESET':
+		# If we got a TLR, honour the reset
+		if self.state != DecoderState.awaitingIDCodes and state == 'TEST-LOGIC-RESET':
 			self.state = DecoderState.awaitingIDCodes
 			self.decoders.clear()
-		elif state == 'SHIFT-IR':
-			self.state = DecoderState.awaitingIR
-		elif state == 'SHIFT-DR':
-			self.state = DecoderState.awaitingDR
+		elif self.state == DecoderState.idle:
+			# If we're all configured and we see Shift-IR, await the new IR value
+			if state == 'SHIFT-IR':
+				self.state = DecoderState.awaitingIR
+			# If we're all configured and we see Shift-DR, await the new DR exchange
+			elif state == 'SHIFT-DR':
+				self.state = DecoderState.awaitingDR
