@@ -381,7 +381,7 @@ class Decoder(srd.Decoder):
 	desc = 'Atmel AVR PDI JTAG protocol.'
 	license = 'gplv2+'
 	inputs = ['jtag']
-	outputs = []
+	outputs = ['pdi']
 	tags = ['Debug/trace']
 	annotations = (
 		('item', 'Item'),
