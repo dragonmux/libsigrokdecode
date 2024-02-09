@@ -50,6 +50,16 @@ class DecoderState(Enum):
 	awaitingDR = auto()
 	inError = auto()
 
+def fromBitstring(bits: str, begin: int, end: int) -> int:
+	'''Grab a chunk from a big bit endian bitstring, and decode it to an integer
+
+	`begin` is the first logical bit desired, `end` is the last forming
+	an interval of the form [begin:end)
+	'''
+	length = len(bits)
+	substr = bits[length - end:length - begin]
+	return int(substr, base = 2)
+
 class JTAGDevice:
 	idcode: int
 	currentIR: int
@@ -160,6 +170,10 @@ class Decoder(srd.Decoder):
 		if action == 'NEW STATE':
 			assert isinstance(value, str)
 			self.handleStateChange(value)
+		# Otherwise decode the data from the state we're currently in
+		else:
+			assert not isinstance(value, str)
+			self.handleData(action, *value)
 
 	def handleStateChange(self, state: str):
 		'''Takes a new state transition from the JTAG decoder and picks out DR and IR shift states to arm
@@ -176,3 +190,56 @@ class Decoder(srd.Decoder):
 			# If we're all configured and we see Shift-DR, await the new DR exchange
 			elif state == 'SHIFT-DR':
 				self.state = DecoderState.awaitingDR
+
+	def handleData(self, state: str, data: str, samplePositions: list[list[int]]):
+		'''Consume data from the JTAG decoder, splitting apart the chunks by device state
+
+		If we're unconfigured, discard whatever we get until we've seen TLR.
+		If we're awaiting ID codes, ideally the next thing to happen is that we see a DR
+		dump - if we don't, go to a permanent error state.
+		If we've got the ID codes for this scan chain, we can then wait to see what the IR
+		topology looks like to determine how many devices and therefore ADIv5 decoders we need.
+		Finally, if we're all set up, we can then feed the data we get into the decoders, having
+		properly chunked it up based on which bits each decoder is actually interested in.
+		'''
+		if self.state == DecoderState.inactive:
+			return
+		# Make the sample positions and data little bit endian for sanity
+		samplePositions.reverse()
+		if self.state == DecoderState.awaitingIDCodes:
+			# If we're awaiting the ID codes from the scan chain and we see anything happen to the IR,
+			# go into an error state as we can't support this (we don't yet know enough about the scan
+			# chain, so this will put things into a bad state
+			if state.startswith('IR'):
+				self.state = DecoderState.inError
+			# If we instead see a DR exchange, this must be the ID code data, so grab it and decode
+			elif state == 'DR TDO':
+				self.handleIDCodes(data, samplePositions)
+
+	def handleIDCodes(self, data: str, samplePositions: list[int]):
+		'''Consume a DR bitstring to be treated as a sequence of ID codes'''
+
+		# Figure out how many devices may be on the chain, rounding down
+		suspectedDevices = len(data) // 32
+		devices = 0
+		for device in range(suspectedDevices):
+			# Pick out the next 32 bits
+			idcode = fromBitstring(data, begin = device * 32, end = (device + 1) * 32)
+			# If we're done, set the number of devices properly and break out the loop
+			if idcode == 0xffffffff:
+				devices = device
+				break
+			# Otherwise, we have a device, put out the ID code in the annotations and create a device for it.
+			# Decode the ID code as appropriate and display that too
+			self.putf(samplePositions[device * 32], samplePositions[(device + 1) * 32],
+			 	[A.JTAG_ITEM, [f'IDCODE: {idcode:08x}']])
+			self.devices.append(JTAGDevice(drPrescan = device, idcode = idcode))
+			devices += 1
+
+		# Having consumed all the available ID codes, compute the postscan for each.
+		for device in range(devices):
+			self.devices[device].drPostscan = devices - device - 1
+		self.state = DecoderState.countingDevices
+
+	def __str__(self):
+		return f'<ADIv5 JTAG Decoder, state {self.state}, {len(self.devices)} devices>'
