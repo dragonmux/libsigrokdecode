@@ -18,6 +18,8 @@
 ##
 
 import sigrokdecode as srd
+from typing import Union
+from enum import Enum, unique, auto
 
 __all__ = ['Decoder']
 
@@ -30,6 +32,31 @@ class Annotations:
 		ADIV5_REQUEST, ADIV5_RESULT,
 	) = range(12)
 A = Annotations
+
+@unique
+class ADIv5State(Enum):
+	idle = auto()
+	dpAccess = auto()
+	apAccess = auto()
+	inError = auto()
+
+@unique
+class DecoderState(Enum):
+	inactive = auto()
+	idle = auto()
+	awaitingIDCodes = auto()
+	countingDevices = auto()
+	awaitingIR = auto()
+	awaitingDR = auto()
+	inError = auto()
+
+class ADIv5Decoder:
+	def __init__(self, decoder: 'Decoder'):
+		self.decoder = decoder
+		self.reset()
+
+	def reset(self):
+		self.state = ADIv5State.idle
 
 class Decoder(srd.Decoder):
 	api_version = 3
@@ -67,3 +94,54 @@ class Decoder(srd.Decoder):
 		('request', 'Request', (A.ADIV5_READ, A.ADIV5_WRITE, A.ADIV5_REGISTER, A.ADIV5_REQUEST)),
 		('result', 'Result', (A.ADIV5_ACK_OK, A.ADIV5_ACK_WAIT, A.ADIV5_ACK_FAULT, A.ADIV5_RESULT)),
 	)
+
+	def __init__(self):
+		self.beginSample = 0
+		self.endSample = 0
+		self.decoders: list[ADIv5Decoder] = []
+
+	def reset(self):
+		self.state = DecoderState.inactive
+		self.decoders.clear()
+
+	def start(self):
+		self.reset()
+		self.outputAnnotation = self.register(srd.OUTPUT_ANN)
+
+	def putx(self, data: list[int, list[str]]):
+		self.put(self.beginSample, self.endSample, self.outputAnnotation, data)
+
+	def putf(self, start: list[int], end: list[int], data: list[int, list[str]]):
+		self.put(start[0], end[0], self.outputAnnotation, data)
+
+	def putb(self, bit: list[int], data: list[int, list[str]]):
+		self.putf(bit, bit, data)
+
+	def decode(self, beginSample: int, endSample: int, data: tuple[str, Union[str, tuple[str, list[list[int]]]]]):
+		'''Take a transaction from the JTAG decoder and decode it into an ADIv5 transaction
+
+		The data input has either the form ('NEW STATE', stateName), or (stateName, (bitstring, [samplePositions])).
+		As we don't actually care about state changes beyond detecting when we go into a new shift state.
+		As such, we mostly discard this former sort, and instead focus on decoding the bitstrings of data
+		from in a state.
+
+		NB: both the IR and DR shift states produce both TDI and TDO data tuples, it's on us to determine
+		which of the two holds any actually useful data.
+		'''
+		self.beginSample, self.endSample = beginSample, endSample
+		action, value = data
+
+		if action == 'NEW STATE':
+			self.handleStateChange(value)
+
+	def handleStateChange(self, state: str):
+		'''Takes a new state transition from the JTAG decoder and picks out DR and IR shift states to arm
+		the ADIv5 decoders for new data/instructions
+		'''
+		if state == 'TEST-LOGIC_RESET':
+			self.state = DecoderState.awaitingIDCodes
+			self.decoders.clear()
+		elif state == 'SHIFT-IR':
+			self.state = DecoderState.awaitingIR
+		elif state == 'SHIFT-DR':
+			self.state = DecoderState.awaitingDR
