@@ -50,6 +50,29 @@ class DecoderState(Enum):
 	awaitingDR = auto()
 	inError = auto()
 
+class JTAGDevice:
+	idcode: int
+	currentIR: int
+
+	drPrescan: int
+	drPostscan: int
+
+	irLength: int
+	irPrescan: int
+	irPostscan: int
+
+	def __init__(self, drPrescan: int, idcode: int):
+		self.idcode = idcode
+		self.drPrescan = drPrescan
+
+	@property
+	def isADIv5(self):
+		'''Check if this ID code is one for an ARM ADIv5 TAP'''
+		return (self.idcode & 0x0fff0fff) == 0x0ba00477
+
+	def __str__(self):
+		return f'<JTAGDevice {self.drPrescan}: {self.idcode:08x}>'
+
 class ADIv5Decoder:
 	def __init__(self, decoder: 'Decoder'):
 		self.decoder = decoder
@@ -98,6 +121,7 @@ class Decoder(srd.Decoder):
 	def __init__(self):
 		self.beginSample = 0
 		self.endSample = 0
+		self.devices: list[JTAGDevice] = []
 		self.decoders: list[ADIv5Decoder] = []
 
 	def reset(self):
