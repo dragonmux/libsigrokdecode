@@ -96,6 +96,12 @@ class JTAGDevice:
 	def irEnd(self):
 		return self.irPrescan + self.irLength - 1
 
+	@property
+	def drLength(self):
+		if self.tapDecoder is None:
+			return None
+		return self.tapDecoder.drLength
+
 	def decodeIDCode(self):
 		# Try and find the ID code in the known devices list
 		for device in jtagDevices:
@@ -297,6 +303,8 @@ class Decoder(srd.Decoder):
 					self.annotateBits(0, -1, [A.JTAG_NOTE, ['Mismatched TDI and TDO lengths']])
 					self.state = DecoderState.inError
 					return
+				# If everything checks out, proceed
+				self.handleDRChange(dataLength = len(data), dataIn = dataIn, dataOut = data)
 
 	def handleIDCodes(self, data: str):
 		'''Consume a DR bitstring to be treated as a sequence of ID codes'''
@@ -413,6 +421,36 @@ class Decoder(srd.Decoder):
 			ir = fromBitstring(data, begin, end)
 			self.annotateBits(begin, end - 1, [A.JTAG_ITEM, [f'IR: {ir:0{(device.irLength + 3) // 4}x}', 'IR']])
 			device.irChange(ir)
+		self.state = DecoderState.idle
+
+	def handleDRChange(self, dataLength: int, dataIn: str, dataOut: str):
+		'''Consume a pair of DR bitstrings and decode what they mean to the device converstation'''
+		# Start by determining the known DR lengths for all devices
+		drLengths = [device.drLength for device in self.devices]
+		# Count unknowns - if there's more than 1, we can't do anything with this DR data
+		drUnknowns = drLengths.count(None)
+		if drUnknowns > 1:
+			# Annotate the bits as being indeterminate, and go back to idle
+			self.annotateBits(0, -1, [A.JTAG_NOTE, ['Too many unknown DR lengths', 'UNKNOWN']])
+			self.state = DecoderState.idle
+			return
+		elif drUnknowns == 1:
+			# Determine what the length of the unknown DR must be and assign it into the lengths list
+			unknownLength = dataLength - sum(0 if length is None else length for length in drLengths)
+			drLengths[drLengths.index(None)] = unknownLength
+
+		offset = 0
+		# Loop through all the known devices, chunking up the DR appropriately and feeding them with their chunks
+		for deviceIndex, device in enumerate(self.devices):
+			drLength = drLengths[deviceIndex]
+			assert drLength is not None
+			# Extract this TAP's DR values and feed them into the decoder
+			begin = offset
+			end = offset + drLength
+			drIn = fromBitstring(dataIn, begin, end)
+			drOut = fromBitstring(dataOut, begin, end)
+			self.annotateBits(begin, end - 1, [A.JTAG_ITEM, ['DR']])
+			offset += drLength
 
 		self.state = DecoderState.idle
 
