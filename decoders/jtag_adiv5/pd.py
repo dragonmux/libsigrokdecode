@@ -47,6 +47,7 @@ class DecoderState(Enum):
 	idle = auto()
 	awaitingIDCodes = auto()
 	countingDevices = auto()
+	awaitingReset = auto()
 	awaitingIR = auto()
 	awaitingDR = auto()
 	inError = auto()
@@ -158,6 +159,7 @@ class Decoder(srd.Decoder):
 
 	def reset(self):
 		self.state = DecoderState.inactive
+		self.irSampleData = None
 		self.decoders.clear()
 
 	def start(self):
@@ -231,13 +233,22 @@ class Decoder(srd.Decoder):
 		self.samplePositions = samplePositions
 		if self.state == DecoderState.awaitingIDCodes:
 			# If we're awaiting the ID codes from the scan chain and we see anything happen to the IR,
-			# go into an error state as we can't support this (we don't yet know enough about the scan
-			# chain, so this will put things into a bad state
-			if state.startswith('IR'):
-				self.state = DecoderState.inError
+			# assumine it's IR scanout, but store the scanned out data to one side to handle after
+			# the ID codes
+			if state == 'IR TDO' and self.irSampleData is None:
+				self.irSamplePositions = samplePositions
+				self.irSampleData = data
+				self.state = DecoderState.awaitingReset
 			# If we instead see a DR exchange, this must be the ID code data, so grab it and decode
 			elif state == 'DR TDO':
 				self.handleIDCodes(data)
+				# If we've stuffed IR data to one side previously, and now we understand the ID codes,
+				# process the IR readout so we can get done setting up
+				if self.irSampleData is not None:
+					self.samplePositions = self.irSamplePositions
+					self.determineIRLengths(self.irSampleData)
+					self.irSampleData = None
+					del self.irSamplePositions
 		elif self.state == DecoderState.countingDevices:
 			# If we now need to determine the IR topology so we can decode the data, check if the next
 			# thing we see is an IR readout - if it is, decode it
