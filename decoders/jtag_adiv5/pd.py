@@ -20,6 +20,7 @@
 import sigrokdecode as srd
 from typing import Union
 from enum import Enum, unique, auto
+from .devices import jtagDevices
 
 __all__ = ['Decoder']
 
@@ -74,11 +75,30 @@ class JTAGDevice:
 	def __init__(self, drPrescan: int, idcode: int):
 		self.idcode = idcode
 		self.drPrescan = drPrescan
+		self.quirks = None
 
 	@property
 	def isADIv5(self):
 		'''Check if this ID code is one for an ARM ADIv5 TAP'''
 		return (self.idcode & 0x0fff0fff) == 0x0ba00477
+
+	@property
+	def hasQuirks(self):
+		return self.quirks is not None
+
+	def decodeIDCode(self):
+		# Try and find the ID code in the known devices list
+		for device in jtagDevices:
+			if (self. idcode & device['mask']) == device['idcode']:
+				# If we get a match, now unpack any quirks information that might be present
+				if 'irQuirks' in device:
+					self.quirks = device['irQuirks']
+				# Now unpack the part number and version values from the ID code
+				partNumber = (self.idcode >> 12) & 0xffff
+				version = (self.idcode >> 28) & 0xf
+				return device['mfr'], partNumber, version, device['description']
+		# If we found nothing, return None
+		return None
 
 	def __str__(self):
 		return f'<JTAGDevice {self.drPrescan}: {self.idcode:08x}>'
