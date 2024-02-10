@@ -60,6 +60,7 @@ def fromBitstring(bits: str, begin: int, end: int = -1) -> int:
 class JTAGDevice:
 	idcode: int
 	currentInsn: int
+	dpIndex: int | None
 
 	drPrescan: int
 	drPostscan: int
@@ -72,6 +73,7 @@ class JTAGDevice:
 		self.decoder = decoder
 		self.tapDecoder = None
 		self.idcode = idcode
+		self.dpIndex = None
 		self.drPrescan = drPrescan
 		self.quirks = None
 
@@ -313,6 +315,7 @@ class Decoder(srd.Decoder):
 		suspectedDevices = len(data) // 32
 		devices = 0
 		offset = 0
+		adiv5Taps = 0
 		for device in range(suspectedDevices):
 			# Pick out the next 32 bits
 			idcode = fromBitstring(data, begin = offset, end = offset + 32)
@@ -335,6 +338,10 @@ class Decoder(srd.Decoder):
 				self.annotateBits(offset + 12, offset + 27, [A.JTAG_FIELD, [f'Partno: {partNumber:04x}', 'Partno', 'P']])
 				self.annotateBits(offset + 28, offset + 31, [A.JTAG_FIELD, [f'Version: {version}', 'Version', 'V']])
 				self.annotateBits(offset, offset + 31, [A.JTAG_NOTE, [description]])
+				# If the device is an ADIv5 TAP, give it its DP index
+				if jtagDevice.isADIv5:
+					jtagDevice.dpIndex = adiv5Taps
+					adiv5Taps += 1
 			devices += 1
 			offset += 32
 			self.devices.append(jtagDevice)
