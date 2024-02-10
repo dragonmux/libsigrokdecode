@@ -162,14 +162,14 @@ class Decoder(srd.Decoder):
 		self.reset()
 		self.outputAnnotation = self.register(srd.OUTPUT_ANN)
 
-	def putx(self, data: list[int, list[str]]):
+	def annotateData(self, data: list[int, list[str]]):
 		self.put(self.beginSample, self.endSample, self.outputAnnotation, data)
 
-	def putf(self, start: list[int], end: list[int], data: list[int, list[str]]):
-		self.put(start[0], end[0], self.outputAnnotation, data)
+	def annotateBits(self, start: int, end: int, data: list[int, list[str]]):
+		self.put(self.samplePositions[start][0], self.samplePositions[end][0], self.outputAnnotation, data)
 
-	def putb(self, bit: list[int], data: list[int, list[str]]):
-		self.putf(bit, bit, data)
+	def annotateBit(self, bit: int, data: list[int, list[str]]):
+		self.annotateBits(bit, bit + 1, data)
 
 	def decode(self, beginSample: int, endSample: int, data: tuple[str, Union[str, tuple[str, list[list[int]]]]]):
 		'''Take a transaction from the JTAG decoder and decode it into an ADIv5 transaction
@@ -226,6 +226,7 @@ class Decoder(srd.Decoder):
 			return
 		# Make the sample positions and data little bit endian for sanity
 		samplePositions.reverse()
+		self.samplePositions = samplePositions
 		if self.state == DecoderState.awaitingIDCodes:
 			# If we're awaiting the ID codes from the scan chain and we see anything happen to the IR,
 			# go into an error state as we can't support this (we don't yet know enough about the scan
@@ -242,19 +243,32 @@ class Decoder(srd.Decoder):
 		# Figure out how many devices may be on the chain, rounding down
 		suspectedDevices = len(data) // 32
 		devices = 0
+		offset = 0
 		for device in range(suspectedDevices):
 			# Pick out the next 32 bits
-			idcode = fromBitstring(data, begin = device * 32, end = (device + 1) * 32)
+			idcode = fromBitstring(data, begin = offset, end = offset + 32)
 			# If we're done, set the number of devices properly and break out the loop
 			if idcode == 0xffffffff:
 				devices = device
 				break
 			# Otherwise, we have a device, put out the ID code in the annotations and create a device for it.
 			# Decode the ID code as appropriate and display that too
-			self.putf(samplePositions[device * 32], samplePositions[(device + 1) * 32],
-			 	[A.JTAG_ITEM, [f'IDCODE: {idcode:08x}']])
-			self.devices.append(JTAGDevice(drPrescan = device, idcode = idcode))
+			jtagDevice = JTAGDevice(drPrescan = device, idcode = idcode)
+			self.annotateBits(offset, offset + 32, [A.JTAG_ITEM, [f'IDCODE: {idcode:08x}']])
+			partCode = jtagDevice.decodeIDCode()
+			if partCode is None:
+				self.annotateBits(offset, offset + 32, [A.JTAG_FIELD, ['Unknown Device', 'Unk', 'U']])
+			else:
+				manufacturer, partNumber, version, description = partCode
+				self.annotateBit(offset, [A.JTAG_FIELD, ['Reserved', 'Res', 'R']])
+				self.annotateBits(offset + 1, offset + 12, [A.JTAG_FIELD,
+					[f'Manufacturer: {manufacturer}', 'Manuf', 'M']])
+				self.annotateBits(offset + 12, offset + 28, [A.JTAG_FIELD, [f'Partno: {partNumber:04x}', 'Partno', 'P']])
+				self.annotateBits(offset + 28, offset + 32, [A.JTAG_FIELD, [f'Version: {version}', 'Version', 'V']])
+				self.annotateBits(offset, offset + 32, [A.JTAG_NOTE, [description]])
 			devices += 1
+			offset += 32
+			self.devices.append(jtagDevice)
 
 		# Having consumed all the available ID codes, compute the postscan for each.
 		for device in range(devices):
