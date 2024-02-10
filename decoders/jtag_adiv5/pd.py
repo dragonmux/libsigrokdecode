@@ -35,13 +35,6 @@ class Annotations:
 A = Annotations
 
 @unique
-class ADIv5State(Enum):
-	idle = auto()
-	dpAccess = auto()
-	apAccess = auto()
-	inError = auto()
-
-@unique
 class DecoderState(Enum):
 	inactive = auto()
 	idle = auto()
@@ -106,14 +99,6 @@ class JTAGDevice:
 	def __str__(self):
 		return f'<JTAGDevice {self.drPrescan}: {self.idcode:08x}>'
 
-class ADIv5Decoder:
-	def __init__(self, decoder: 'Decoder'):
-		self.decoder = decoder
-		self.reset()
-
-	def reset(self):
-		self.state = ADIv5State.idle
-
 class Decoder(srd.Decoder):
 	api_version = 3
 	id = 'jtag_arm'
@@ -155,12 +140,11 @@ class Decoder(srd.Decoder):
 		self.beginSample = 0
 		self.endSample = 0
 		self.devices: list[JTAGDevice] = []
-		self.decoders: list[ADIv5Decoder] = []
 
 	def reset(self):
 		self.state = DecoderState.inactive
 		self.irSampleData = None
-		self.decoders.clear()
+		self.devices.clear()
 
 	def start(self):
 		self.reset()
@@ -206,7 +190,7 @@ class Decoder(srd.Decoder):
 		# If we got a TLR, honour the reset
 		if self.state != DecoderState.awaitingIDCodes and state == 'TEST-LOGIC-RESET':
 			self.state = DecoderState.awaitingIDCodes
-			self.decoders.clear()
+			self.devices.clear()
 		elif self.state == DecoderState.idle:
 			# If we're all configured and we see Shift-IR, await the new IR value
 			if state == 'SHIFT-IR':
