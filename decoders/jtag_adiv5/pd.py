@@ -59,7 +59,7 @@ def fromBitstring(bits: str, begin: int, end: int = -1) -> int:
 
 class JTAGDevice:
 	idcode: int
-	currentIR: int
+	currentInsn: int
 
 	drPrescan: int
 	drPostscan: int
@@ -84,6 +84,18 @@ class JTAGDevice:
 	def hasQuirks(self):
 		return self.quirks is not None
 
+	@property
+	def deviceIndex(self):
+		return self.drPrescan
+
+	@property
+	def irBegin(self):
+		return self.irPrescan
+
+	@property
+	def irEnd(self):
+		return self.irPrescan + self.irLength - 1
+
 	def decodeIDCode(self):
 		# Try and find the ID code in the known devices list
 		for device in jtagDevices:
@@ -104,8 +116,25 @@ class JTAGDevice:
 			from .adiv5 import ADIv5Decoder
 			self.tapDecoder = ADIv5Decoder(self)
 
+	def irChange(self, newInsn: int):
+		# Store the new instruction value
+		self.currentInsn = newInsn
+		# If there is no decoder for this TAP, do what we can
+		if self.tapDecoder is None:
+			# If the instruction is the bypass bit sequence, display that at least
+			if newInsn == (1 << self.irLength) - 1:
+				self.decoder.annotateBits(self.irBegin, self.irEnd,
+					[A.JTAG_COMMAND, [f'TAP {self.deviceIndex}: BYPASS', 'BYPASS']])
+			# Otherwise display it as an unknown instruction
+			else:
+				self.decoder.annotateBits(self.irBegin, self.irEnd,
+					[A.JTAG_COMMAND, [f'TAP {self.deviceIndex}: UNKNOWN', 'UNKNOWN']])
+		# Otherwise, if we've got a TAP decoder, ask it to decode the instruction and annotate
+		else:
+			self.tapDecoder.decodeInsn()
+
 	def __str__(self):
-		return f'<JTAGDevice {self.drPrescan}: {self.idcode:08x}>'
+		return f'<JTAGDevice {self.deviceIndex}: {self.idcode:08x}>'
 
 class Decoder(srd.Decoder):
 	api_version = 3
@@ -343,7 +372,7 @@ class Decoder(srd.Decoder):
 				jtagDevice.irPrescan = prescan
 				jtagDevice.setupDecoder()
 				# During the scan-out process, the device will be put into BYPASS
-				jtagDevice.currentIR = (1 << deviceIR) - 1
+				jtagDevice.irChange((1 << deviceIR) - 1)
 				prescan += deviceIR
 				device += 1
 				irLength = overrun
@@ -369,7 +398,7 @@ class Decoder(srd.Decoder):
 			end = begin + device.irLength
 			ir = fromBitstring(data, begin, end)
 			self.annotateBits(begin, end - 1, [A.JTAG_ITEM, [f'IR: {ir:0{(device.irLength + 3) // 4}x}', 'IR']])
-			device.currentIR = ir
+			device.irChange(ir)
 
 		self.state = DecoderState.idle
 
