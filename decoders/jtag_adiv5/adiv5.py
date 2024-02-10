@@ -139,3 +139,17 @@ class ADIv5Decoder:
 		accessType = 'read' if transaction.rnw == ADIv5RnW.read else 'write'
 		self.device.decoder.annotateBits(begin, end,
 			[A.JTAG_COMMAND, [f'TAP {deviceIndex}: DP{dpIndex} {target} {accessType}']])
+
+		if self.state == ADIv5State.abort:
+			self.decodeAbort(begin, end, transaction)
+
+	def decodeAbort(self, begin: int, end: int, transaction: ADIv5Transaction):
+		# If we've decoded a request to write the abort register, it's a bad request
+		# The address bits should also always be 0 to select the correct register
+		if transaction.rnw == ADIv5RnW.read or transaction.addr != 0:
+			self.device.decoder.annotateBits(begin, end, [A.ADIV5_REQUEST, ['Invalid request']])
+			return
+		# Emit annotations for the ABORT write onto the request track
+		self.device.decoder.annotateBit(begin, [A.ADIV5_WRITE, ['Write', 'WR', 'W']])
+		self.device.decoder.annotateBits(begin + 1, begin + 2, [A.ADIV5_REGISTER, ['ABORT', 'ABT']])
+		self.device.decoder.annotateBits(begin + 3, end, [A.ADIV5_REQUEST, [f'{transaction.request:08x}']])
