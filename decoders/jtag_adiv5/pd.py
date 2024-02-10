@@ -169,11 +169,11 @@ class Decoder(srd.Decoder):
 	def annotateData(self, data: list[int, list[str]]):
 		self.put(self.beginSample, self.endSample, self.outputAnnotation, data)
 
-	def annotateBits(self, start: int, end: int, data: list[int | list[str]]):
-		self.put(self.samplePositions[start][0], self.samplePositions[end][0], self.outputAnnotation, data)
+	def annotateBits(self, begin: int, end: int, data: list[int | list[str]]):
+		self.put(self.samplePositions[begin][0], self.samplePositions[end][1], self.outputAnnotation, data)
 
 	def annotateBit(self, bit: int, data: list[int | list[str]]):
-		self.annotateBits(bit, bit + 1, data)
+		self.annotateBits(bit, bit, data)
 
 	def decode(self, beginSample: int, endSample: int, data: tuple[str, Union[str, tuple[str, list[list[int]]]]]):
 		'''Take a transaction from the JTAG decoder and decode it into an ADIv5 transaction
@@ -275,18 +275,18 @@ class Decoder(srd.Decoder):
 			# Otherwise, we have a device, put out the ID code in the annotations and create a device for it.
 			# Decode the ID code as appropriate and display that too
 			jtagDevice = JTAGDevice(drPrescan = device, idcode = idcode)
-			self.annotateBits(offset, offset + 32, [A.JTAG_ITEM, [f'IDCODE: {idcode:08x}']])
+			self.annotateBits(offset, offset + 31, [A.JTAG_ITEM, [f'IDCODE: {idcode:08x}', 'IDCODE', 'I']])
 			partCode = jtagDevice.decodeIDCode()
 			if partCode is None:
-				self.annotateBits(offset, offset + 32, [A.JTAG_FIELD, ['Unknown Device', 'Unk', 'U']])
+				self.annotateBits(offset, offset + 31, [A.JTAG_FIELD, ['Unknown Device', 'Unk', 'U']])
 			else:
 				manufacturer, partNumber, version, description = partCode
 				self.annotateBit(offset, [A.JTAG_FIELD, ['Reserved', 'Res', 'R']])
-				self.annotateBits(offset + 1, offset + 12, [A.JTAG_FIELD,
+				self.annotateBits(offset + 1, offset + 11, [A.JTAG_FIELD,
 					[f'Manufacturer: {manufacturer}', 'Manuf', 'M']])
-				self.annotateBits(offset + 12, offset + 28, [A.JTAG_FIELD, [f'Partno: {partNumber:04x}', 'Partno', 'P']])
-				self.annotateBits(offset + 28, offset + 32, [A.JTAG_FIELD, [f'Version: {version}', 'Version', 'V']])
-				self.annotateBits(offset, offset + 32, [A.JTAG_NOTE, [description]])
+				self.annotateBits(offset + 12, offset + 27, [A.JTAG_FIELD, [f'Partno: {partNumber:04x}', 'Partno', 'P']])
+				self.annotateBits(offset + 28, offset + 31, [A.JTAG_FIELD, [f'Version: {version}', 'Version', 'V']])
+				self.annotateBits(offset, offset + 31, [A.JTAG_NOTE, [description]])
 			devices += 1
 			offset += 32
 			self.devices.append(jtagDevice)
@@ -310,7 +310,7 @@ class Decoder(srd.Decoder):
 			nextBit = fromBitstring(data, offset)
 			# If we have quirks, validate the bit against the expected IR
 			if irQuirks is not None and ((irQuirks['value'] >> irLength) & 1) == nextBit:
-				self.annotateBits(prescan, offset + 1, [A.JTAG_NOTE, ['Error decoding IR']])
+				self.annotateBits(prescan, offset, [A.JTAG_NOTE, ['Error decoding IR']])
 				self.state = DecoderState.inError
 				return
 			#  IEEE 1149.1 requires the first bit to be a 1, but not all devices conform
@@ -338,7 +338,7 @@ class Decoder(srd.Decoder):
 				# if not then we overrun by 1 for the device. Calculate the adjustment.
 				overrun = 1 if irQuirks is None else 0
 				deviceIR = irLength - overrun
-				self.annotateBits(prescan, prescan + deviceIR, [A.JTAG_FIELD, [f'{deviceIR} bit IR']])
+				self.annotateBits(prescan, prescan + deviceIR - 1, [A.JTAG_FIELD, [f'{deviceIR} bit IR']])
 
 				# Set up the IR fields for the device and set up for the next
 				jtagDevice = self.devices[device]
