@@ -42,14 +42,30 @@ class ADIv5Decoder:
 		self.device = device
 		self.state = ADIv5State.idle
 
-	def decodeInsn(self):
+	@property
+	def instruction(self):
 		# 8-bit instructions only extend the 4-bit ones with the high bits set for all valid ones
 		# so truncate them back down to 4-bit for this having verified they're in range
 		if self.device.irLength == 8 and self.device.currentInsn & 0xf0 != 0xf0:
-			insn = 0
+			return 0
 		else:
-			insn = self.device.currentInsn & 0xf
-		# Now look the instruction up, convert it to a decoder state and annotate the bits
-		name, self.state = ADIv5Decoder.instructions.get(insn, ('UNKNOWN', ADIv5State.inError))
+			return self.device.currentInsn & 0xf
+
+	@property
+	def drLength(self):
+		'''Convert the current instruction over to its associated DR length'''
+		insn = self.instruction
+		if insn == 0xf:
+			return 1
+		elif insn == 0xe:
+			return 32
+		elif insn in (0x8, 0xa, 0xb):
+			return 35
+		# Return None if we don't know what the DR length could be
+		return None
+
+	def decodeInsn(self):
+		# Look the instruction up, convert it to a decoder state and annotate the bits
+		name, self.state = ADIv5Decoder.instructions.get(self.instruction, ('UNKNOWN', ADIv5State.inError))
 		self.device.decoder.annotateBits(self.device.irBegin, self.device.irEnd,
 			[A.JTAG_COMMAND, [f'TAP {self.device.deviceIndex}: {name}', name]])
