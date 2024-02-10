@@ -283,6 +283,20 @@ class Decoder(srd.Decoder):
 			# ADIv5 decoders for the new action/state
 			if state == 'IR TDI':
 				self.handleIRChange(data)
+		elif self.state == DecoderState.awaitingDR:
+			# If we're awaiting a DR change, grab the TDI data and store it -
+			# the JTAG decoder hands us first the in data then out data.
+			# Thankfully, the sample positions for both are identical
+			if state == 'DR TDI':
+				self.dataIn = data
+			elif state == 'DR TDO':
+				# Grab the in data and verify that the lengths match
+				dataIn = self.dataIn
+				del self.dataIn
+				if len(dataIn) != len(data):
+					self.annotateBits(0, -1, [A.JTAG_NOTE, ['Mismatched TDI and TDO lengths']])
+					self.state = DecoderState.inError
+					return
 
 	def handleIDCodes(self, data: str):
 		'''Consume a DR bitstring to be treated as a sequence of ID codes'''
