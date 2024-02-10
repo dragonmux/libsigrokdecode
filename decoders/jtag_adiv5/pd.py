@@ -257,6 +257,11 @@ class Decoder(srd.Decoder):
 			# If we see activity on the DR while we wait, something's gone very wrong, so bail
 			elif state.startswith('DR'):
 				self.state = DecoderState.inError
+		elif self.state == DecoderState.awaitingIR:
+			# If we're awaiting an IR change, grab the value being loaded in to reconfigure the
+			# ADIv5 decoders for the new action/state
+			if state == 'IR TDI':
+				self.handleIRChange(data)
 
 	def handleIDCodes(self, data: str):
 		'''Consume a DR bitstring to be treated as a sequence of ID codes'''
@@ -361,6 +366,18 @@ class Decoder(srd.Decoder):
 			jtagDevice.irPostscan = postscan
 			postscan += jtagDevice.irLength
 		# Now we're all set up, switch into our idle state
+		self.state = DecoderState.idle
+
+	def handleIRChange(self, data: str):
+		'''Consume a new IR state bitstring to determine what the next DR transaction means'''
+		# Loop through all the known devices, updating them with their new IR values
+		for device in self.devices:
+			begin = device.irPrescan
+			end = begin + device.irLength
+			ir = fromBitstring(data, begin, end)
+			self.annotateBits(begin, end - 1, [A.JTAG_ITEM, [f'IR: {ir:0{(device.irLength + 3) // 4}x}', 'IR']])
+			device.currentIR = ir
+
 		self.state = DecoderState.idle
 
 	def __str__(self):
