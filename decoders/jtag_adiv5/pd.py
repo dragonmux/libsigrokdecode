@@ -51,13 +51,15 @@ class DecoderState(Enum):
 	awaitingDR = auto()
 	inError = auto()
 
-def fromBitstring(bits: str, begin: int, end: int) -> int:
+def fromBitstring(bits: str, begin: int, end: int = -1) -> int:
 	'''Grab a chunk from a big bit endian bitstring, and decode it to an integer
 
 	`begin` is the first logical bit desired, `end` is the last forming
 	an interval of the form [begin:end)
 	'''
 	length = len(bits)
+	if end == -1:
+		end = begin + 1
 	substr = bits[length - end:length - begin]
 	return int(substr, base = 2)
 
@@ -165,10 +167,10 @@ class Decoder(srd.Decoder):
 	def annotateData(self, data: list[int, list[str]]):
 		self.put(self.beginSample, self.endSample, self.outputAnnotation, data)
 
-	def annotateBits(self, start: int, end: int, data: list[int, list[str]]):
+	def annotateBits(self, start: int, end: int, data: list[int | list[str]]):
 		self.put(self.samplePositions[start][0], self.samplePositions[end][0], self.outputAnnotation, data)
 
-	def annotateBit(self, bit: int, data: list[int, list[str]]):
+	def annotateBit(self, bit: int, data: list[int | list[str]]):
 		self.annotateBits(bit, bit + 1, data)
 
 	def decode(self, beginSample: int, endSample: int, data: tuple[str, Union[str, tuple[str, list[list[int]]]]]):
@@ -235,9 +237,17 @@ class Decoder(srd.Decoder):
 				self.state = DecoderState.inError
 			# If we instead see a DR exchange, this must be the ID code data, so grab it and decode
 			elif state == 'DR TDO':
-				self.handleIDCodes(data, samplePositions)
+				self.handleIDCodes(data)
+		elif self.state == DecoderState.countingDevices:
+			# If we now need to determine the IR topology so we can decode the data, check if the next
+			# thing we see is an IR readout - if it is, decode it
+			if state == 'IR TDO':
+				self.determineIRLengths(data)
+			# If we see activity on the DR while we wait, something's gone very wrong, so bail
+			elif state.startswith('DR'):
+				self.state = DecoderState.inError
 
-	def handleIDCodes(self, data: str, samplePositions: list[int]):
+	def handleIDCodes(self, data: str):
 		'''Consume a DR bitstring to be treated as a sequence of ID codes'''
 
 		# Figure out how many devices may be on the chain, rounding down
@@ -274,6 +284,73 @@ class Decoder(srd.Decoder):
 		for device in range(devices):
 			self.devices[device].drPostscan = devices - device - 1
 		self.state = DecoderState.countingDevices
+
+	def determineIRLengths(self, data: str):
+		'''Consume an IR bitstring to detemine the IR lengths and topology'''
+
+		# Get any quirks we may have for the first device
+		prescan = 0
+		device = 0
+		irLength = 0
+		irQuirks = self.devices[device].quirks
+
+		# Loop through each of the bits in the bitstring, counting how long the IRs for each device is
+		for offset in range(len(data)):
+			nextBit = fromBitstring(data, offset)
+			# If we have quirks, validate the bit against the expected IR
+			if irQuirks is not None and ((irQuirks['value'] >> irLength) & 1) == nextBit:
+				self.annotateBits(prescan, offset + 1, [A.JTAG_NOTE, ['Error decoding IR']])
+				self.state = DecoderState.inError
+				return
+			#  IEEE 1149.1 requires the first bit to be a 1, but not all devices conform
+			if irLength == 0 and not nextBit:
+				self.annotateBit(prescan, [A.JTAG_NOTE, ['Buggy IR[0]']])
+
+			# If we got here, we've got a good IR bit
+			irLength += 1
+
+			# Now, if we do not have quirks in play and this was a 1 bit and we're not reading the first
+			# bit of the current IR, or if we've now read sufficient bits for the quirk, we've got a complete IR
+			if ((irQuirks is None and nextBit and irLength > 1) or
+				(irQuirks is not None and irLength == irQuirks['length'])):
+				# If we're not in quirks mode and the IR length is now 2 (2 1-bit in a row read), we're done
+				if irQuirks is None and irLength == 2:
+					break
+				# If we've consumed all the devices on the chain and there's still IRs data to consume
+				# then something is terribly wrong
+				if device == len(self.devices):
+					self.annotateBits(prescan, len(data) - 1, [A.JTAG_NOTE, ['Error decoding IR']])
+					self.state = DecoderState.inError
+					return
+
+				# If we're reading using quirks, we'll read exactly the right number of bits,
+				# if not then we overrun by 1 for the device. Calculate the adjustment.
+				overrun = 1 if irQuirks is None else 0
+				deviceIR = irLength - overrun
+				self.annotateBits(prescan, prescan + deviceIR, [A.JTAG_FIELD, [f'{deviceIR} bit IR']])
+
+				# Set up the IR fields for the device and set up for the next
+				jtagDevice = self.devices[device]
+				jtagDevice.irLength = deviceIR
+				jtagDevice.irPrescan = prescan
+				# During the scan-out process, the device will be put into BYPASS
+				jtagDevice.currentIR = (1 << deviceIR) - 1
+				prescan += deviceIR
+				device += 1
+				irLength = overrun
+				# Grab the quirks for the next device that should be on the chain
+				if device < len(self.devices):
+					irQuirks = self.devices[device].quirks
+				else:
+					irQuirks = None
+
+		# Loop through all the devices calculating their IR postscan values now we're done
+		postscan = 0
+		for jtagDevice in reversed(self.devices):
+			jtagDevice.irPostscan = postscan
+			postscan += jtagDevice.irLength
+		# Now we're all set up, switch into our idle state
+		self.state = DecoderState.idle
 
 	def __str__(self):
 		return f'<ADIv5 JTAG Decoder, state {self.state}, {len(self.devices)} devices>'
