@@ -68,7 +68,9 @@ class JTAGDevice:
 	irPrescan: int
 	irPostscan: int
 
-	def __init__(self, drPrescan: int, idcode: int):
+	def __init__(self, decoder: 'Decoder', drPrescan: int, idcode: int):
+		self.decoder = decoder
+		self.tapDecoder = None
 		self.idcode = idcode
 		self.drPrescan = drPrescan
 		self.quirks = None
@@ -95,6 +97,12 @@ class JTAGDevice:
 				return device['mfr'], partNumber, version, device['description']
 		# If we found nothing, return None
 		return None
+
+	def setupDecoder(self):
+		# If this is an ADIv5 TAP, set up the ADIv5 decoder for it
+		if self.isADIv5:
+			from .adiv5 import ADIv5Decoder
+			self.tapDecoder = ADIv5Decoder(self)
 
 	def __str__(self):
 		return f'<JTAGDevice {self.drPrescan}: {self.idcode:08x}>'
@@ -263,7 +271,7 @@ class Decoder(srd.Decoder):
 				break
 			# Otherwise, we have a device, put out the ID code in the annotations and create a device for it.
 			# Decode the ID code as appropriate and display that too
-			jtagDevice = JTAGDevice(drPrescan = device, idcode = idcode)
+			jtagDevice = JTAGDevice(decoder = self, drPrescan = device, idcode = idcode)
 			self.annotateBits(offset, offset + 31, [A.JTAG_ITEM, [f'IDCODE: {idcode:08x}', 'IDCODE', 'I']])
 			partCode = jtagDevice.decodeIDCode()
 			if partCode is None:
@@ -333,6 +341,7 @@ class Decoder(srd.Decoder):
 				jtagDevice = self.devices[device]
 				jtagDevice.irLength = deviceIR
 				jtagDevice.irPrescan = prescan
+				jtagDevice.setupDecoder()
 				# During the scan-out process, the device will be put into BYPASS
 				jtagDevice.currentIR = (1 << deviceIR) - 1
 				prescan += deviceIR

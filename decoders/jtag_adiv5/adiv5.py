@@ -36,12 +36,10 @@ class ADIv5Decoder:
 		0xe: ('IDCODE', ADIv5State.idle),
 		0xf: ('BYPASS', ADIv5State.idle),
 	}
+	state: ADIv5State
 
 	def __init__(self, device: 'JTAGDevice'):
 		self.device = device
-		self.reset()
-
-	def reset(self):
 		self.state = ADIv5State.idle
 
 	def decodeInsn(self):
