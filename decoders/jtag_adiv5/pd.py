@@ -141,6 +141,12 @@ class JTAGDevice:
 		else:
 			self.tapDecoder.decodeInsn()
 
+	def decodeDR(self, begin: int, end: int, dataIn: int, dataOut: int):
+		# If there's no decoder for this tap, we can do nothing
+		if self.tapDecoder is not None:
+			# Pass the request through to the specific decoder
+			self.tapDecoder.decodeData(begin, end, dataIn, dataOut)
+
 	def __str__(self):
 		return f'<JTAGDevice {self.deviceIndex}: {self.idcode:08x}>'
 
@@ -456,7 +462,7 @@ class Decoder(srd.Decoder):
 			end = offset + drLength
 			drIn = fromBitstring(dataIn, begin, end)
 			drOut = fromBitstring(dataOut, begin, end)
-			self.annotateBits(begin, end - 1, [A.JTAG_ITEM, ['DR']])
+			device.decodeDR(begin, end - 1, drIn, drOut)
 			offset += drLength
 
 		self.state = DecoderState.idle

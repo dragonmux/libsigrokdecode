@@ -17,7 +17,7 @@
 ## along with this program; if not, see <http://www.gnu.org/licenses/>.
 ##
 
-from enum import Enum, unique, auto
+from enum import Enum, IntEnum, unique, auto
 from .pd import JTAGDevice, A
 
 @unique
@@ -27,6 +27,50 @@ class ADIv5State(Enum):
 	dpAccess = auto()
 	apAccess = auto()
 	inError = auto()
+
+	@property
+	def target(self):
+		if self == ADIv5State.abort:
+			return 'ABORT'
+		elif self == ADIv5State.dpAccess:
+			return 'DP'
+		elif self == ADIv5State.apAccess:
+			return 'AP'
+		else:
+			return 'UNKNOWN'
+
+class ADIv5RnW(IntEnum):
+	write = 0
+	read = 1
+
+class ADIv5Ack(IntEnum):
+	ok = 1
+	wait = 2
+	fault = 4
+
+class ADIv5Transaction:
+	def __init__(self, dataIn: int, dataOut: int):
+		self.rnw = ADIv5RnW(dataIn & 1)
+		self.addr = ((dataIn >> 1) & 3) << 2
+		self.request = dataIn >> 3
+		self.ack = dataOut & 7
+		self.response = dataOut >> 3
+
+	@property
+	def ack(self):
+		return self._ack
+
+	@ack.setter
+	def ack(self, ack):
+		# JTAG-DPs respond with 2 for OK
+		if ack == 2:
+			self._ack = ADIv5Ack.ok
+		# 1 for WAIT
+		elif ack == 1:
+			self._ack = ADIv5Ack.wait
+		# And everything else is a fault condition
+		else:
+			self._ack = ADIv5Ack.fault
 
 class ADIv5Decoder:
 	instructions = {
@@ -69,3 +113,29 @@ class ADIv5Decoder:
 		name, self.state = ADIv5Decoder.instructions.get(self.instruction, ('UNKNOWN', ADIv5State.inError))
 		self.device.decoder.annotateBits(self.device.irBegin, self.device.irEnd,
 			[A.JTAG_COMMAND, [f'TAP {self.device.deviceIndex}: {name}', name]])
+
+	def decodeData(self, begin: int, end: int, dataIn: int, dataOut: int):
+		# If we're in an idle state, do nothing
+		if self.state == ADIv5State.idle:
+			return
+
+		# Annotate the bits to display the hex values
+		hexLength: int = (self.drLength + 3) // 4
+		insnName, _ = ADIv5Decoder.instructions.get(self.instruction, ('UNKNOWN', ADIv5State.inError))
+		self.device.decoder.annotateBits(begin, end,
+			[A.JTAG_ITEM, [
+				f'{insnName} Data - In: {dataIn:0{hexLength}x}, Out: {dataOut:0{hexLength}x}',
+				f'{insnName} Data',
+				'Data'
+			]]
+		)
+
+		# Turn the request into a transaction
+		transaction = ADIv5Transaction(dataIn, dataOut)
+		# With that decoded, annotate the request as a command
+		deviceIndex = self.device.deviceIndex
+		dpIndex: int = self.device.dpIndex
+		target = self.state.target
+		accessType = 'read' if transaction.rnw == ADIv5RnW.read else 'write'
+		self.device.decoder.annotateBits(begin, end,
+			[A.JTAG_COMMAND, [f'TAP {deviceIndex}: DP{dpIndex} {target} {accessType}']])
