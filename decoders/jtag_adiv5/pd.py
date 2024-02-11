@@ -18,9 +18,36 @@
 ##
 
 import sigrokdecode as srd
-from typing import Union
+from typing import Union, Literal
 from enum import Enum, unique, auto
 from .devices import jtagDevices
+
+'''
+OUTPUT_PYTHON format:
+
+Packet:
+(<op>, <addr>, <reg>, <ack>, <data>)
+
+<op>:
+ - 'DP_READ'
+ - 'DP_WRITE'
+ - 'AP_READ'
+ - 'AP_WRITE'
+
+<addr>:
+8-bit address of the operation
+
+<reg>:
+The decoded register name for the operation
+
+<ack>
+ - 'OK'
+ - 'WAIT'
+ - 'FAULT'
+
+<data>
+32-bit data value associated with the operation
+'''
 
 __all__ = ['Decoder']
 
@@ -33,6 +60,9 @@ class Annotations:
 		ADIV5_REQUEST, ADIV5_RESULT,
 	) = range(12)
 A = Annotations
+
+ADIv5Op = Literal['DP_READ', 'DP_WRITE', 'AP_READ', 'AP_WRITE']
+ADIv5Ack = Literal['OK', 'WAIT', 'FAULT']
 
 @unique
 class DecoderState(Enum):
@@ -188,8 +218,6 @@ class Decoder(srd.Decoder):
 	)
 
 	def __init__(self):
-		self.beginSample = 0
-		self.endSample = 0
 		self.devices: list[JTAGDevice] = []
 
 	def reset(self):
@@ -200,9 +228,10 @@ class Decoder(srd.Decoder):
 	def start(self):
 		self.reset()
 		self.outputAnnotation = self.register(srd.OUTPUT_ANN)
+		self.outputPython = self.register(srd.OUTPUT_PYTHON)
 
-	def annotateData(self, data: list[int, list[str]]):
-		self.put(self.beginSample, self.endSample, self.outputAnnotation, data)
+	def emit(self, interval: tuple[int, int], data: tuple[ADIv5Op, int, str, ADIv5Ack, int]):
+		self.put(interval[0], interval[1], self.outputPython, data)
 
 	def annotateBits(self, begin: int, end: int, data: list[int | list[str]]):
 		self.put(self.samplePositions[begin][0], self.samplePositions[end][1], self.outputAnnotation, data)
@@ -221,8 +250,6 @@ class Decoder(srd.Decoder):
 		NB: both the IR and DR shift states produce both TDI and TDO data tuples, it's on us to determine
 		which of the two holds any actually useful data.
 		'''
-		self.beginSample = beginSample
-		self.endSample = endSample
 		action, value = data
 
 		# If this is a state change message, figure out if we care
