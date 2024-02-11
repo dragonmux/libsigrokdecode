@@ -328,7 +328,7 @@ class ADIv5Decoder:
 		self.device.decoder.annotateBits(begin + 3, end, [A.ADIV5_REQUEST, [f'{transaction.request:08x}']])
 		# And emit it to the next decoder in the stack
 		self.device.decoder.emit(transaction.sampleInterval,
-			('DP_WRITE', 0x00, 'ABORT', transaction.ack.name, transaction.request))
+			('DP_WRITE', self.device.dpIndex, 0x00, 'ABORT', transaction.ack.name, transaction.request))
 
 	def decodeResponse(self, begin: int, end: int, transaction: ADIv5Transaction):
 		# Determine the state of the previous transaction and annotate it to the response track
@@ -342,6 +342,20 @@ class ADIv5Decoder:
 				# If this response is for an AP read transaction, feed it into the AP handler
 				if transaction.ack == ADIv5Ack.ok and self.transaction.target == ADIv5Target.ap:
 					self.ap[self.select.apsel].handleRegRead(self.transaction.register[0], transaction.response)
+				# Emit the read into the next decoder up the stack now we have everything
+				# (though filter out RDBUFF requests as they're no-ops in the JTAG-DP protocol
+				# used to get the response of the previous request)
+				if self.transaction.register[1] != 'RDBUFF':
+					self.device.decoder.emit((self.transaction.sampleInterval[0], transaction.sampleInterval[1]), (
+						f'{self.transaction.target.name}_READ', self.device.dpIndex, *self.transaction.register,
+						transaction.ack.name, transaction.response
+					))
+			else:
+				# Emit the write into the next decoder up the stack now we have everything
+				self.device.decoder.emit((self.transaction.sampleInterval[0], transaction.sampleInterval[1]), (
+					f'{self.transaction.target.name}_WRITE', self.device.dpIndex, *self.transaction.register,
+					transaction.ack.name, self.transaction.request
+				))
 			# Having processed the previous transaction's result, increment the number and store this transaction
 			self.transactionNumber += 1
 		self.transaction = transaction

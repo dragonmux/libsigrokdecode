@@ -26,13 +26,16 @@ from .devices import jtagDevices
 OUTPUT_PYTHON format:
 
 Packet:
-(<op>, <addr>, <reg>, <ack>, <data>)
+(<op>, <dp>, <addr>, <reg>, <ack>, <data>)
 
 <op>:
  - 'DP_READ'
  - 'DP_WRITE'
  - 'AP_READ'
  - 'AP_WRITE'
+
+<dp>:
+integer index of the DP to which the operation was requested
 
 <addr>:
 8-bit address of the operation
@@ -230,7 +233,7 @@ class Decoder(srd.Decoder):
 		self.outputAnnotation = self.register(srd.OUTPUT_ANN)
 		self.outputPython = self.register(srd.OUTPUT_PYTHON)
 
-	def emit(self, interval: tuple[int, int], data: tuple[ADIv5Op, int, str, ADIv5Ack, int]):
+	def emit(self, interval: tuple[int, int], data: tuple[ADIv5Op, int, int, str, ADIv5Ack, int]):
 		self.put(interval[0], interval[1], self.outputPython, data)
 
 	def annotateBits(self, begin: int, end: int, data: list[int | list[str]]):
