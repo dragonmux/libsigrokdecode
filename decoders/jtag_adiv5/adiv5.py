@@ -39,6 +39,14 @@ class ADIv5State(Enum):
 		else:
 			return 'UNKNOWN'
 
+class ADIv5Target(Enum):
+	ap = auto()
+	dp = auto()
+
+	@property
+	def name(self):
+		return super().name.upper()
+
 class ADIv5RnW(IntEnum):
 	write = 0
 	read = 1
@@ -73,7 +81,7 @@ class ADIv5Transaction:
 	register: tuple[int, str]
 
 	def __init__(self, dataIn: int, dataOut: int, state: ADIv5State):
-		self.state = state
+		self.target = ADIv5Target.ap if state == ADIv5State.apAccess else ADIv5Target.dp
 		self.rnw = ADIv5RnW(dataIn & 1)
 		self.addr = ((dataIn >> 1) & 3) << 2
 		self.request = dataIn >> 3
@@ -203,8 +211,7 @@ class ADIv5AP:
 		elif self.kind == ADIv5APKind.unknown:
 			return decodeUnknownAPReg
 
-	def handleRegRead(self, addr: int, bank: int, value: int):
-		reg = (bank << 4) | addr
+	def handleRegRead(self, reg: int, value: int):
 		# If the read is for the IDR, decode the IDR's value and switch our AP kind to the result
 		if reg == 0xfc:
 			idr = ADIv5APIdentReg(value)
@@ -327,9 +334,8 @@ class ADIv5Decoder:
 				self.device.decoder.annotateBits(begin + 3, end,
 					[A.ADIV5_RESULT, [f'Read: {transaction.response:08x}', 'Read', 'R']])
 				# If this response is for an AP read transaction, feed it into the AP handler
-				if transaction.ack == ADIv5Ack.ok and self.transaction.state == ADIv5State.apAccess:
-					self.ap[self.select.apsel].handleRegRead(self.transaction.addr, self.select.apBank,
-						transaction.response)
+				if transaction.ack == ADIv5Ack.ok and self.transaction.target == ADIv5Target.ap:
+					self.ap[self.select.apsel].handleRegRead(self.transaction.register[0], transaction.response)
 			# Having processed the previous transaction's result, increment the number and store this transaction
 			self.transactionNumber += 1
 		self.transaction = transaction
