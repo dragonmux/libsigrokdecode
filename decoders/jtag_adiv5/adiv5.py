@@ -72,6 +72,19 @@ class ADIv5Transaction:
 		else:
 			self._ack = ADIv5Ack.fault
 
+class ADIv5DPSelect:
+	'''Internal representation of the state of the DP SELECT register'''
+	def __init__(self):
+		self.apsel = 0
+		self.apBank = 0
+		self.dpBank = 0
+
+	def changeValue(self, select: int):
+		'''Decode a write to the SELECT register to get the new value'''
+		self.apsel = select >> 24
+		self.apBank = (select >> 2) & 3
+		self.dpBank = select & 3
+
 class ADIv5Decoder:
 	instructions = {
 		0x8: ('ABORT', ADIv5State.abort),
@@ -85,6 +98,9 @@ class ADIv5Decoder:
 	def __init__(self, device: 'JTAGDevice'):
 		self.device = device
 		self.state = ADIv5State.idle
+		self.transactionNumber = 0
+		self.transaction: ADIv5Transaction | None = None
+		self.select = ADIv5DPSelect()
 
 	@property
 	def instruction(self):
