@@ -56,7 +56,8 @@ class ADIv5APKind(Enum):
 	unknown = auto()
 
 class ADIv5Transaction:
-	def __init__(self, dataIn: int, dataOut: int):
+	def __init__(self, dataIn: int, dataOut: int, state: ADIv5State):
+		self.state = state
 		self.rnw = ADIv5RnW(dataIn & 1)
 		self.addr = ((dataIn >> 1) & 3) << 2
 		self.request = dataIn >> 3
@@ -210,6 +211,7 @@ class ADIv5Decoder:
 		self.transactionNumber = 0
 		self.transaction: ADIv5Transaction | None = None
 		self.select = ADIv5DPSelect()
+		self.ap: dict[int, ADIv5AP] = {}
 
 	@property
 	def instruction(self):
@@ -256,11 +258,13 @@ class ADIv5Decoder:
 		)
 
 		# Turn the request into a transaction
-		transaction = ADIv5Transaction(dataIn, dataOut)
+		transaction = ADIv5Transaction(dataIn, dataOut, self.state)
 		# With that decoded, annotate the request as a command
 		deviceIndex = self.device.deviceIndex
 		dpIndex: int = self.device.dpIndex
 		target = self.state.target
+		if self.state == ADIv5State.apAccess:
+			target = f'AP{self.select.apsel} {target}'
 		accessType = 'read' if transaction.rnw == ADIv5RnW.read else 'write'
 		self.device.decoder.annotateBits(begin, end,
 			[A.JTAG_COMMAND, [f'TAP {deviceIndex}: DP{dpIndex} {target} {accessType}']])
@@ -282,6 +286,8 @@ class ADIv5Decoder:
 		# Now handle AP vs DP details
 		if self.state == ADIv5State.dpAccess:
 			self.decodeDPAccess(begin, end, transaction)
+		elif self.state == ADIv5State.apAccess:
+			self.decodeAPAccess(begin, end, transaction)
 
 	def decodeAbort(self, begin: int, end: int, transaction: ADIv5Transaction):
 		# If we've decoded a request to write the abort register, it's a bad request
@@ -309,6 +315,10 @@ class ADIv5Decoder:
 			if self.transaction.rnw == ADIv5RnW.read:
 				self.device.decoder.annotateBits(begin + 3, end,
 					[A.ADIV5_RESULT, [f'Read: {transaction.response:08x}', 'Read', 'R']])
+				# If this response is for an AP read transaction, feed it into the AP handler
+				if transaction.ack == ADIv5Ack.ok and self.transaction.state == ADIv5State.apAccess:
+					self.ap[self.select.apsel].handleRegRead(self.transaction.addr, self.select.apBank,
+						transaction.response)
 			# Having processed the previous transaction's result, increment the number and store this transaction
 			self.transactionNumber += 1
 		self.transaction = transaction
@@ -363,3 +373,13 @@ class ADIv5Decoder:
 		if register == 'SELECT' and transaction.rnw == ADIv5RnW.write:
 			self.select.changeValue(transaction.request)
 		# And emit it to the next decoder in the stack
+
+	def decodeAPAccess(self, begin: int, end: int, transaction: ADIv5Transaction):
+		# Get the AP associated with this transaction
+		ap = self.ap.get(self.select.apsel)
+		if ap is None:
+			ap = self.ap[self.select.apsel] = ADIv5AP(self.select.apsel)
+		# Now grab the register name for this AP
+		register = ap.regDecoder(transaction.rnw, (self.select.apBank << 4) | transaction.addr)
+		self.device.decoder.annotateBits(begin + 1, begin + 2,
+			[A.ADIV5_REGISTER, [register]])
