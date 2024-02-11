@@ -163,6 +163,13 @@ class ADIv5Decoder:
 
 		# Normal transactions are lagged over two requests, w/ the new request having the status of the previous.
 		self.decodeResponse(begin, end, transaction)
+		# Having dealt with the previous transaction, now decode the current
+		# Start by annotating if this is a read or a write
+		if transaction.rnw == ADIv5RnW.read:
+			self.device.decoder.annotateBit(begin, [A.ADIV5_READ, ['Read', 'RD', 'R']])
+		elif transaction.rnw == ADIv5RnW.write:
+			self.device.decoder.annotateBit(begin, [A.ADIV5_WRITE, ['Write', 'WR', 'W']])
+			self.device.decoder.annotateBits(begin + 3, end, [A.ADIV5_REQUEST, [f'{transaction.request:08x}']])
 
 	def decodeAbort(self, begin: int, end: int, transaction: ADIv5Transaction):
 		# If we've decoded a request to write the abort register, it's a bad request
