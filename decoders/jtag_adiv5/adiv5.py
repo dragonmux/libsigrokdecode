@@ -48,6 +48,20 @@ class ADIv5Ack(IntEnum):
 	wait = 2
 	fault = 4
 
+	@property
+	def name(self):
+		return super().name.upper()
+
+	@property
+	def annotationID(self):
+		if self == ADIv5Ack.ok:
+			return A.ADIV5_ACK_OK
+		elif self == ADIv5Ack.wait:
+			return A.ADIV5_ACK_WAIT
+		elif self == ADIv5Ack.fault:
+			return A.ADIV5_ACK_FAULT
+		raise ValueError('Invalid ADIv5 ack value')
+
 @unique
 class ADIv5APKind(Enum):
 	jtag = auto()
@@ -308,12 +322,7 @@ class ADIv5Decoder:
 		if self.transaction is not None:
 			# Only decode the response if we've got a previous transaction (otherwise we don't have enough
 			# information to know how to understand the response we're getting)
-			if transaction.ack == ADIv5Ack.ok:
-				self.device.decoder.annotateBits(begin, begin + 2, [A.ADIV5_ACK_OK, ['OK']])
-			elif transaction.ack == ADIv5Ack.wait:
-				self.device.decoder.annotateBits(begin, begin + 2, [A.ADIV5_ACK_OK, ['WAIT']])
-			elif transaction.ack == ADIv5Ack.fault:
-				self.device.decoder.annotateBits(begin, begin + 2, [A.ADIV5_ACK_OK, ['FAULT']])
+			self.device.decoder.annotateBits(begin, begin + 2, [transaction.ack.annotationID, [transaction.ack.name]])
 			if self.transaction.rnw == ADIv5RnW.read:
 				self.device.decoder.annotateBits(begin + 3, end,
 					[A.ADIV5_RESULT, [f'Read: {transaction.response:08x}', 'Read', 'R']])
