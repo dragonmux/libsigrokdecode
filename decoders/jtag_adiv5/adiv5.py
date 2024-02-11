@@ -80,13 +80,14 @@ class ADIv5APKind(Enum):
 class ADIv5Transaction:
 	register: tuple[int, str]
 
-	def __init__(self, dataIn: int, dataOut: int, state: ADIv5State):
+	def __init__(self, dataIn: int, dataOut: int, state: ADIv5State, sampleInterval: tuple[int, int]):
 		self.target = ADIv5Target.ap if state == ADIv5State.apAccess else ADIv5Target.dp
 		self.rnw = ADIv5RnW(dataIn & 1)
 		self.addr = ((dataIn >> 1) & 3) << 2
 		self.request = dataIn >> 3
 		self.ack = dataOut & 7
 		self.response = dataOut >> 3
+		self.sampleInterval = sampleInterval
 
 	@property
 	def ack(self):
@@ -265,6 +266,7 @@ class ADIv5Decoder:
 			[A.JTAG_COMMAND, [f'TAP {self.device.deviceIndex}: {name}', name]])
 
 	def decodeData(self, begin: int, end: int, dataIn: int, dataOut: int):
+		'''Consume a transaction of data from the JTAG-DP and process it into annotations and ADIv5 packets'''
 		# If we're in an idle state, do nothing
 		if self.state == ADIv5State.idle:
 			return
@@ -281,7 +283,9 @@ class ADIv5Decoder:
 		)
 
 		# Turn the request into a transaction
-		transaction = ADIv5Transaction(dataIn, dataOut, self.state)
+		transaction = ADIv5Transaction(dataIn, dataOut, self.state, sampleInterval =
+			(self.device.decoder.samplePositions[begin][0], self.device.decoder.samplePositions[end][1])
+		)
 		# With that decoded, annotate the request as a command
 		deviceIndex = self.device.deviceIndex
 		dpIndex: int = self.device.dpIndex
@@ -323,6 +327,8 @@ class ADIv5Decoder:
 		self.device.decoder.annotateBits(begin + 1, begin + 2, [A.ADIV5_REGISTER, ['ABORT', 'ABT']])
 		self.device.decoder.annotateBits(begin + 3, end, [A.ADIV5_REQUEST, [f'{transaction.request:08x}']])
 		# And emit it to the next decoder in the stack
+		self.device.decoder.emit(transaction.sampleInterval,
+			('DP_WRITE', 0x00, 'ABORT', transaction.ack.name, transaction.request))
 
 	def decodeResponse(self, begin: int, end: int, transaction: ADIv5Transaction):
 		# Determine the state of the previous transaction and annotate it to the response track
