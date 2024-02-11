@@ -92,6 +92,31 @@ class ADIv5DPSelect:
 		self.apBank = (select >> 4) & 0xf
 		self.dpBank = select & 0xf
 
+class ADIv5APIdentReg:
+	'''Internal representation of an AP's IDR'''
+	def __init__(self, value: int):
+		# Exctract the AP class and type from the IDR value
+		apClass = (value >> 13) & 0xf
+		apType = value & 0xf
+
+		# Decode them to the AP kind
+		if apType == 0x0 and apClass == 0x0:
+			self.kind = ADIv5APKind.jtag
+		elif apType == 0x0 and apClass == 0x1:
+			self.kind = ADIv5APKind.com
+		elif 0x1 <= apType <= 0x8 and apClass == 0x8:
+			self.kind = ADIv5APKind.mem
+		else:
+			self.kind = ADIv5APKind.unknown
+
+		# Also grab and store the other AP ID metadata
+		self.revision = value >> 28
+		self.designer = (value >> 17) & 0x7ff
+		self.variant = (value >> 4) & 0xf
+
+	def __str__(self):
+		return f'<AP IDR, kind = {self.kind}, designer: {self.designer:03x}, rev: {self.revision}, var: {self.variant}>'
+
 def decodeUnknownAPReg(rnw: ADIv5RnW, addr: int):
 	'''Decodes AP register accesses for an unknown type of AP'''
 	# IDR is read-only
@@ -160,6 +185,13 @@ class ADIv5AP:
 			return decodeUnknownAPReg
 		elif self.kind == ADIv5APKind.unknown:
 			return decodeUnknownAPReg
+
+	def handleRegRead(self, addr: int, bank: int, value: int):
+		reg = (bank << 4) | addr
+		# If the read is for the IDR, decode the IDR's value and switch our AP kind to the result
+		if reg == 0xfc:
+			idr = ADIv5APIdentReg(value)
+			self.kind = idr.kind
 
 class ADIv5Decoder:
 	instructions = {
