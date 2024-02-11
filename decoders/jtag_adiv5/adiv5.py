@@ -156,8 +156,13 @@ class ADIv5Decoder:
 		self.device.decoder.annotateBits(begin, end,
 			[A.JTAG_COMMAND, [f'TAP {deviceIndex}: DP{dpIndex} {target} {accessType}']])
 
+		# Handle requests to the ABORT register as those are nice and tidy
 		if self.state == ADIv5State.abort:
 			self.decodeAbort(begin, end, transaction)
+			return
+
+		# Normal transactions are lagged over two requests, w/ the new request having the status of the previous.
+		self.decodeResponse(begin, end, transaction)
 
 	def decodeAbort(self, begin: int, end: int, transaction: ADIv5Transaction):
 		# If we've decoded a request to write the abort register, it's a bad request
@@ -169,3 +174,22 @@ class ADIv5Decoder:
 		self.device.decoder.annotateBit(begin, [A.ADIV5_WRITE, ['Write', 'WR', 'W']])
 		self.device.decoder.annotateBits(begin + 1, begin + 2, [A.ADIV5_REGISTER, ['ABORT', 'ABT']])
 		self.device.decoder.annotateBits(begin + 3, end, [A.ADIV5_REQUEST, [f'{transaction.request:08x}']])
+		# And emit it to the next decoder in the stack
+
+	def decodeResponse(self, begin: int, end: int, transaction: ADIv5Transaction):
+		# Determine the state of the previous transaction and annotate it to the response track
+		if self.transaction is not None:
+			# Only decode the response if we've got a previous transaction (otherwise we don't have enough
+			# information to know how to understand the response we're getting)
+			if transaction.ack == ADIv5Ack.ok:
+				self.device.decoder.annotateBits(begin, begin + 2, [A.ADIV5_ACK_OK, ['OK']])
+			elif transaction.ack == ADIv5Ack.wait:
+				self.device.decoder.annotateBits(begin, begin + 2, [A.ADIV5_ACK_OK, ['WAIT']])
+			elif transaction.ack == ADIv5Ack.fault:
+				self.device.decoder.annotateBits(begin, begin + 2, [A.ADIV5_ACK_OK, ['FAULT']])
+			if self.transaction.rnw == ADIv5RnW.read:
+				self.device.decoder.annotateBits(begin + 3, end,
+					[A.ADIV5_RESULT, [f'Read: {transaction.response:08x}', 'Read', 'R']])
+			# Having processed the previous transaction's result, increment the number and store this transaction
+			self.transactionNumber += 1
+		self.transaction = transaction
