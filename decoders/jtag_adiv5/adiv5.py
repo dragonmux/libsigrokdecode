@@ -98,6 +98,7 @@ class ADIv5Decoder:
 	def __init__(self, device: 'JTAGDevice'):
 		self.device = device
 		self.state = ADIv5State.idle
+		self.dpVersion = (device.idcode >> 12) & 0xf
 		self.transactionNumber = 0
 		self.transaction: ADIv5Transaction | None = None
 		self.select = ADIv5DPSelect()
@@ -170,6 +171,9 @@ class ADIv5Decoder:
 		elif transaction.rnw == ADIv5RnW.write:
 			self.device.decoder.annotateBit(begin, [A.ADIV5_WRITE, ['Write', 'WR', 'W']])
 			self.device.decoder.annotateBits(begin + 3, end, [A.ADIV5_REQUEST, [f'{transaction.request:08x}']])
+		# Now handle AP vs DP details
+		if self.state == ADIv5State.dpAccess:
+			self.decodeDPAccess(begin, end, transaction)
 
 	def decodeAbort(self, begin: int, end: int, transaction: ADIv5Transaction):
 		# If we've decoded a request to write the abort register, it's a bad request
@@ -200,3 +204,51 @@ class ADIv5Decoder:
 			# Having processed the previous transaction's result, increment the number and store this transaction
 			self.transactionNumber += 1
 		self.transaction = transaction
+
+	def decodeDPReg(self, transaction: ADIv5Transaction):
+		rnw = transaction.rnw
+		reg = transaction.addr
+		# DPv0's only have bank 0 registers, so ignore the bank value on them
+		bank = 0 if self.dpVersion == 0 else self.select.dpBank
+
+		# If it's a write for register 8, regardless of bank, it's SELECT
+		if rnw == ADIv5RnW.write and reg == 8:
+			return 'SELECT'
+		# If it's a read for register 12, regardless of bank, it's RDBUFF
+		elif rnw == ADIv5RnW.read and reg == 12:
+			return 'RDBUFF'
+
+		# Having dealt with the registers that appear on all banks regardless of version,
+		# deal with the last registers for DPv0 and that only appear on bank 0
+		if bank == 0:
+			if reg == 4:
+				return 'CTRL/STAT'
+			if self.dpVersion == 0 and rnw == ADIv5RnW.read and reg == 8:
+				return 'SELECT'
+
+		# Now deal with DPv1+ all-banks registers
+		if self.dpVersion >= 1 and rnw == ADIv5RnW.read and reg == 0:
+			return 'DPIDR'
+
+		# Now deal with DPv1+ bank-specific registers
+		if self.dpVersion >= 1 and bank == 1 and reg == 4:
+			return 'DLCR'
+
+		# Now deal with DPv2+ bank-specific registers
+		if self.dpVersion >= 2 and rnw == ADIv5RnW.read and reg == 4:
+			if bank == 2:
+				return 'TARGETID'
+			elif bank == 3:
+				return 'DLPIDR'
+			elif bank == 4:
+				return 'EVENTSTAT'
+
+		# Having exhausted all other possible registers, deal with invalid ones
+		return 'INVALID'
+
+	def decodeDPAccess(self, begin: int, end: int, transaction: ADIv5Transaction):
+		# Decode the register being requested
+		register = self.decodeDPReg(transaction)
+		self.device.decoder.annotateBits(begin + 1, begin + 2,
+			[A.ADIV5_REGISTER, [register]])
+		# And emit it to the next decoder in the stack
