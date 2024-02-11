@@ -82,8 +82,8 @@ class ADIv5DPSelect:
 	def changeValue(self, select: int):
 		'''Decode a write to the SELECT register to get the new value'''
 		self.apsel = select >> 24
-		self.apBank = (select >> 2) & 3
-		self.dpBank = select & 3
+		self.apBank = (select >> 4) & 0xf
+		self.dpBank = select & 0xf
 
 class ADIv5Decoder:
 	instructions = {
@@ -251,4 +251,7 @@ class ADIv5Decoder:
 		register = self.decodeDPReg(transaction)
 		self.device.decoder.annotateBits(begin + 1, begin + 2,
 			[A.ADIV5_REGISTER, [register]])
+		# If it's a write to the select register, also pass that to our internal notion of its state
+		if register == 'SELECT' and transaction.rnw == ADIv5RnW.write:
+			self.select.changeValue(transaction.request)
 		# And emit it to the next decoder in the stack
