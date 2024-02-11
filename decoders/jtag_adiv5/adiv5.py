@@ -56,6 +56,8 @@ class ADIv5APKind(Enum):
 	unknown = auto()
 
 class ADIv5Transaction:
+	register: tuple[int, str]
+
 	def __init__(self, dataIn: int, dataOut: int, state: ADIv5State):
 		self.state = state
 		self.rnw = ADIv5RnW(dataIn & 1)
@@ -372,7 +374,8 @@ class ADIv5Decoder:
 		# If it's a write to the select register, also pass that to our internal notion of its state
 		if register == 'SELECT' and transaction.rnw == ADIv5RnW.write:
 			self.select.changeValue(transaction.request)
-		# And emit it to the next decoder in the stack
+		# Store the decoded register for later access when we have the associated ack
+		transaction.register = ((self.select.dpBank << 4) | transaction.addr, register)
 
 	def decodeAPAccess(self, begin: int, end: int, transaction: ADIv5Transaction):
 		# Get the AP associated with this transaction
@@ -380,6 +383,9 @@ class ADIv5Decoder:
 		if ap is None:
 			ap = self.ap[self.select.apsel] = ADIv5AP(self.select.apsel)
 		# Now grab the register name for this AP
-		register = ap.regDecoder(transaction.rnw, (self.select.apBank << 4) | transaction.addr)
+		address = (self.select.apBank << 4) | transaction.addr
+		register = ap.regDecoder(transaction.rnw, address)
 		self.device.decoder.annotateBits(begin + 1, begin + 2,
 			[A.ADIV5_REGISTER, [register]])
+		# Store the decoded register for later access when we have the associated ack
+		transaction.register = (address, register)
