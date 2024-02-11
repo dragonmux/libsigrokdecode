@@ -48,6 +48,13 @@ class ADIv5Ack(IntEnum):
 	wait = 2
 	fault = 4
 
+@unique
+class ADIv5APKind(Enum):
+	jtag = auto()
+	com = auto()
+	mem = auto()
+	unknown = auto()
+
 class ADIv5Transaction:
 	def __init__(self, dataIn: int, dataOut: int):
 		self.rnw = ADIv5RnW(dataIn & 1)
@@ -84,6 +91,75 @@ class ADIv5DPSelect:
 		self.apsel = select >> 24
 		self.apBank = (select >> 4) & 0xf
 		self.dpBank = select & 0xf
+
+def decodeUnknownAPReg(rnw: ADIv5RnW, addr: int):
+	'''Decodes AP register accesses for an unknown type of AP'''
+	# IDR is read-only
+	if rnw == ADIv5RnW.read and addr == 0xfc:
+		return 'IDR'
+	return f'INVALID ({addr:02x})'
+
+def decodeJTAGAPReg(rnw: ADIv5RnW, addr: int):
+	'''Decodes AP register accesses for JTAG-APs'''
+	if addr == 0x00:
+		return 'CSW'
+	elif addr == 0x04:
+		return 'PSEL'
+	elif addr == 0x08:
+		return 'PSTA'
+	elif 0x10 <= addr <= 0x1c:
+		reg = (addr >> 2) & 3
+		return f'BRFIFO{reg + 1}'
+	# Once we've exhausted the standard JTAG-AP regs, defer to the unknwon AP type decoder
+	return decodeUnknownAPReg(rnw, addr)
+
+def decodeMemAPReg(rnw: ADIv5RnW, addr: int):
+	'''Decodes AP register accesses for MEM-APs'''
+	if addr == 0x00:
+		return 'CSW'
+	elif addr == 0x04:
+		return 'TAR (low)'
+	elif addr == 0x08:
+		return 'TAR (high)'
+	elif addr == 0x0c:
+		return 'DRW'
+	elif 0x10 < addr < 0x1c:
+		reg = (addr >> 2) & 3
+		return f'BD{reg}'
+	elif addr == 0x20:
+		return 'MBT'
+	elif addr == 0x30:
+		return 'T0TR'
+	elif rnw == ADIv5RnW.read:
+		if addr == 0xe0:
+			return 'CFG1'
+		elif addr == 0xf0:
+			return 'BASE (high)'
+		elif addr == 0xf4:
+			return 'CFG'
+		elif addr == 0xf8:
+			return 'BASE (low)'
+	# Once we've exhausted the standard MEM-AP regs, defer to the unknwon AP type decoder
+	return decodeUnknownAPReg(rnw, addr)
+
+class ADIv5AP:
+	'''Internal representation of an ADIv5 AP'''
+	def __init__(self, apsel: int):
+		self.apsel = apsel
+		self.kind = ADIv5APKind.unknown
+
+	@property
+	def regDecoder(self):
+		if self.kind == ADIv5APKind.jtag:
+			return decodeJTAGAPReg
+		elif self.kind == ADIv5APKind.mem:
+			return decodeMemAPReg
+		elif self.kind == ADIv5APKind.com:
+			# These are actually defined in an entirely seperate guide
+			# and we don't currently support them.
+			return decodeUnknownAPReg
+		elif self.kind == ADIv5APKind.unknown:
+			return decodeUnknownAPReg
 
 class ADIv5Decoder:
 	instructions = {
