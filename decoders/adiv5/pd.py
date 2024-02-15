@@ -18,6 +18,7 @@
 ##
 
 import sigrokdecode as srd
+from abc import ABCMeta, abstractmethod
 from enum import Enum, unique, auto
 from typing import Literal
 
@@ -50,6 +51,13 @@ class ADIv5Ack(Enum):
 	fault = auto()
 	noResult = auto()
 
+@unique
+class ADIv5APKind(Enum):
+	jtag = auto()
+	com = auto()
+	mem = auto()
+	unknown = auto()
+
 class ADIv5Transaction:
 	def __init__(self, op: ADIv5Op, dp: int, addr: int, reg: str, ack: ADIv5Ack, data: int):
 		target, rnw = op.split('_')
@@ -70,12 +78,124 @@ class ADIv5Transaction:
 		else:
 			raise ValueError('Invalid ACK value given')
 
-class ADIv5AP:
+class ADIv5APIdentReg:
+	'''Internal representation of an AP's IDR'''
+	def __init__(self, value: int):
+		# Exctract the AP class and type from the IDR value
+		apClass = (value >> 13) & 0xf
+		apType = value & 0xf
+
+		# Decode them to the AP kind
+		if apType == 0x0 and apClass == 0x0:
+			self.kind = ADIv5APKind.jtag
+		elif apType == 0x0 and apClass == 0x1:
+			self.kind = ADIv5APKind.com
+		elif 0x1 <= apType <= 0x8 and apClass == 0x8:
+			self.kind = ADIv5APKind.mem
+		else:
+			self.kind = ADIv5APKind.unknown
+
+		# Also grab and store the other AP ID metadata
+		self.revision = value >> 28
+		self.designer = (value >> 17) & 0x7ff
+		self.variant = (value >> 4) & 0xf
+
+	def __str__(self):
+		return f'<AP IDR, kind = {self.kind}, designer: {self.designer:03x}, rev: {self.revision}, var: {self.variant}>'
+
+class ADIv5AP(metaclass = ABCMeta):
 	'''This serves as a base type for all AP variants'''
 	@staticmethod
-	def fromID(id: int):
+	def fromID(value: int):
 		'''Construct a suitable AP instance from an ID register value'''
-		pass
+		ident = ADIv5APIdentReg(value)
+		if ident.kind == ADIv5APKind.jtag:
+			return ADIv5JTAGAP(ident)
+
+	@abstractmethod
+	def __init__(self, ident: ADIv5APIdentReg):
+		self.idr = ident
+
+	@abstractmethod
+	def decodeTransaction(self, transaction: ADIv5Transaction):
+		reg = transaction.register[1]
+		if reg == 'IDR':
+			self.idr = ADIv5APIdentReg(transaction.data)
+		else:
+			raise ValueError('Invalid register passed to AP instance')
+
+class ADIv5JTAGAP(ADIv5AP):
+	def __init__(self, ident: ADIv5APIdentReg):
+		super().__init__(ident)
+		self.csw = 0
+		self.psel = 0
+		self.psta = 0
+		self.brfifo = tuple(0, 0, 0, 0)
+
+	def decodeTransaction(self, transaction: ADIv5Transaction):
+		addr, reg = transaction.register
+		if reg == 'CSW':
+			self.csw = transaction.data
+		elif reg == 'PSEL':
+			self.psel = transaction.data
+		elif reg == 'PSTA':
+			self.psta = transaction.data
+		elif reg.startswith('BRFIFO'):
+			index = (addr >> 2) & 3
+			self.brfifo[index] = transaction.data
+		else:
+			super().decodeTransaction(transaction)
+
+class ADIV5MemAP(ADIv5AP):
+	def __init__(self, ident: ADIv5APIdentReg):
+		super().__init__(ident)
+		self.csw = 0
+		self.tar = 0
+		self.drw = 0
+		self.bd = tuple(0, 0, 0, 0)
+		self.mbt = 0
+		self.t0tr = 0
+		self.cfg1 = 0
+		self.cfg = 0
+		self.base = 0
+
+	def decodeTransaction(self, transaction: ADIv5Transaction):
+		addr, reg = transaction.register
+		if reg == 'CSW':
+			self.csw = transaction.data
+		elif reg.startswith('TAR'):
+			# If it's the low half, discard the low 32 bits and replace them
+			if addr == 0x04:
+				self.tar &= 0xffffffff_00000000
+				self.tar |= transaction.data
+			# If it's the high half however, discard the upper 32 bits and replace them instead
+			else:
+				self.tar &= 0x00000000_ffffffff
+				self.tar |= (transaction.data << 32)
+		elif reg == 'DRW':
+			self.drw = transaction.data
+		elif reg.startswith('BD'):
+			index = (addr >> 2) & 3
+			self.bd[index] = transaction.data
+		elif reg == 'MBT':
+			self.mbt = transaction.data
+		elif reg == 'T0TR':
+			self.t0tr = transaction.data
+		elif reg == 'CFG1':
+			self.cfg1 = transaction.data
+		elif reg == 'CFG':
+			self.cfg = transaction.data
+		elif reg.startswith('BASE'):
+			# If it's the low half, discard the low 32 bits and replace them
+			if addr == 0xf8:
+				self.base &= 0xffffffff_00000000
+				self.base |= transaction.data
+			# If it's the high half however, discard the upper 32 bits and replace them instead
+			else:
+				self.base &= 0x00000000_ffffffff
+				self.base |= (transaction.data << 32)
+		else:
+			super().decodeTransaction(transaction)
 
 class ADIv5DPCtrlStat:
 	pass
@@ -137,7 +257,9 @@ class ADIv5DP:
 			# and if so, make a new DP instance based on the decoded value
 			ap = self.ap.get(self.select.currentAP)
 			if ap is None:
-				return
+				if transaction.register != 'IDR':
+					return
+				ap = self.ap[self.select.currentAP] = ADIv5AP.fromID(transaction.data)
 
 class Decoder(srd.Decoder):
 	api_version = 3
