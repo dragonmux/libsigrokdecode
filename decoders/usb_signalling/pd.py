@@ -138,12 +138,15 @@ class Decoder(srd.Decoder):
         ('symbols', 'Symbols', (0, 1, 2, 3)),
     )
 
+    samplenum: int
+
     def __init__(self):
         self.reset()
 
     def reset(self):
         self.samplerate = None
         self.oldsym = 'J' # The "idle" state is J.
+        self.maybe_sym = None
         self.ss_block = None
         self.bitrate = None
         self.bitwidth = None
@@ -202,9 +205,18 @@ class Decoder(srd.Decoder):
         self.samplenum_edge = int(self.samplepos - (self.bitwidth / 2))
 
     def wait_for_sop(self, sym):
+        # If we get a SE1 after J, this might be a badly skewed SOP
+        if sym == 'SE1' and self.oldsym == 'J':
+            self.maybe_sym = self.samplenum
         # Wait for a Start of Packet (SOP), i.e. a J->K symbol change.
         if sym != 'K' or self.oldsym != 'J':
             return
+        # If we got a possibly skewed SOP and we now see an actual K symbol,
+        # reset the sampling position to that original SOP if it's within a bit time
+        if self.maybe_sym is not None:
+            if self.maybe_sym >= self.samplenum - self.bitwidth:
+                self.samplenum = self.maybe_sym
+            self.maybe_sym = None
         self.consecutive_ones = 0
         self.bits = ''
         self.update_bitrate()
@@ -273,7 +285,7 @@ class Decoder(srd.Decoder):
             self.signalling = 'low-speed-rp'
             self.update_bitrate()
             self.oldsym = 'J'
-        if b == '0':
+        if b == '0' and int(self.bitwidth) != self.bitwidth:
             edgesym = symbols[self.signalling][tuple(self.edgepins)]
             if edgesym not in ('SE0', 'SE1'):
                 if edgesym == sym:
@@ -330,6 +342,13 @@ class Decoder(srd.Decoder):
                 pins = self.wait([{'skip': self.samplenum_target - self.samplenum}])
 
                 sym = symbols[self.signalling][pins]
+                edgesym = symbols[self.signalling][self.edgepins]
+                # Correct for poor bit timing causing misdetection of single-ended conditions
+                if sym.startswith('SE'):
+                    sym = edgesym
+                # And again for poor timing, but this time of the wrong bit value
+                elif sym != edgesym and self.oldsym == sym:
+                    sym = edgesym
                 if self.state == St.GET_BIT:
                     self.get_bit(sym)
                 elif self.state == St.GET_EOP:
