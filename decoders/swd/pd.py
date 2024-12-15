@@ -96,7 +96,8 @@ class Decoder(srd.Decoder):
 		{
 			'id': 'strict_start',
 			'desc': 'Wait for a line reset before starting to decode',
-			'default': 'no', 'values': ('yes', 'no')
+			'default': 'no',
+			'values': ('yes', 'no')
 		 },
 	)
 	annotations = (
