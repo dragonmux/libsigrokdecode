@@ -135,6 +135,13 @@ class Decoder(srd.Decoder):
 		self.annotateBits(bit, bit, data)
 
 	def handle_request(self):
+		# Was this the start of one of the special sequences?
+		if self.request == 0xc9:
+			self.state = DecoderState.selectionAlert
+			self.request <<= 120
+			self.bits += 1
+			print(f'Selection Alert begin: {self.request:x} {self.bits}')
+			return
 
 		# If the stop bit is high, then this was actually a part of a line reset (probably?)
 		if (self.request & (1 << 7)) != 0:
@@ -194,6 +201,27 @@ class Decoder(srd.Decoder):
 					self.ack = 0
 					self.state = DecoderState.ack
 					self.startSample = self.samplenum
+
+			case DecoderState.selectionAlert:
+				# Consume the next bit on the rising edge of the clock
+				if swclk == 1:
+					self.request >>= 1
+					self.request |= (swdio << 127)
+					self.bits += 1
+					# Check we've got a complete sequence
+					if self.bits == 127:
+						self.request >>= 1
+						# Is it a valid Alert Sequence?
+						if self.request == 0x19bc0ea2e3ddafe986852d956209f392:
+							# Mark it, wait for the activation sequence
+							self.state = DecoderState.activation
+							self.bits = 0
+							self.annotateBits(self.startSample, self.samplenum, [A.ENABLE, ['ALERT SEQUENCE', 'ALLERT', 'AS']])
+							self.startSample = self.samplenum
+						else:
+							# We got an invalid sequence, mark the error and go to the unknown state
+							self.state = DecoderState.unknown
+							self.annotateBits(self.startSample, self.samplenum, [A.ERROR, [f'INVALID SEQUENCE {self.request:x}']])
 
 	def decode(self):
 		while True:
