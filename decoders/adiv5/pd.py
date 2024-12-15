@@ -131,7 +131,7 @@ class ADIv5JTAGAP(ADIv5AP):
 		self.csw = 0
 		self.psel = 0
 		self.psta = 0
-		self.brfifo = tuple(0, 0, 0, 0)
+		self.brfifo = list[int]((0, 0, 0, 0))
 
 	def decodeTransaction(self, transaction: ADIv5Transaction):
 		addr, reg = transaction.register
@@ -153,7 +153,7 @@ class ADIV5MemAP(ADIv5AP):
 		self.csw = 0
 		self.tar = 0
 		self.drw = 0
-		self.bd = tuple(0, 0, 0, 0)
+		self.bd = list[int]((0, 0, 0, 0))
 		self.mbt = 0
 		self.t0tr = 0
 		self.cfg1 = 0
@@ -227,7 +227,7 @@ class ADIv5DP:
 		self.targetid = 0
 		self.dlpidr = 0
 		self.eventstat = 0
-		self.ap: dict[int, ADIv5AP] = {}
+		self.ap = dict[int, ADIv5AP]()
 
 	def decodeTransaction(self, transaction: ADIv5Transaction):
 		# If the transaction is for the DP, process the data into current register state
