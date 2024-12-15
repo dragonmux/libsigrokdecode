@@ -31,7 +31,7 @@ class JTAGDeviceDescription(TypedDict, total = False):
 	irQuirks: JTAGIRQuirks
 
 '''Descriptions, ID codes and quirks for supported devices'''
-jtagDevices: tuple[JTAGDeviceDescription] = (
+jtagDevices = tuple[JTAGDeviceDescription]((
 	{
 		'idcode': 0x0ba00477,
 		'mask': 0x0fffffff,
@@ -60,4 +60,4 @@ jtagDevices: tuple[JTAGDeviceDescription] = (
 			'value': 0x11
 		}
 	}
-)
+))
