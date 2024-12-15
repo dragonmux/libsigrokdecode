@@ -216,13 +216,41 @@ class Decoder(srd.Decoder):
 						if self.request == 0x19bc0ea2e3ddafe986852d956209f392:
 							# Mark it, wait for the activation sequence
 							self.state = DecoderState.activation
+							self.request = 0
 							self.bits = 0
-							self.annotateBits(self.startSample, self.samplenum, [A.ENABLE, ['ALERT SEQUENCE', 'ALLERT', 'AS']])
+							self.annotateBits(self.startSample, self.samplenum, [A.ENABLE, ['ALERT SEQUENCE', 'ALERT', 'AS']])
 							self.startSample = self.samplenum
 						else:
 							# We got an invalid sequence, mark the error and go to the unknown state
 							self.state = DecoderState.unknown
-							self.annotateBits(self.startSample, self.samplenum, [A.ERROR, [f'INVALID SEQUENCE {self.request:x}']])
+							self.annotateBits(self.startSample, self.samplenum, [A.ERROR, [f'INVALID SEQUENCE {self.request:x}', 'INV SEQ', 'IS']])
+
+			case DecoderState.activation:
+				if swclk == 1:
+					# Consume the first 4 bits and ensure they're all 0
+					if self.bits < 4:
+						# If we got a bad sequence, abort and go to unknown state
+						if swdio == 1:
+							self.state = DecoderState.unknown
+							self.annotateBits(self.startSample, self.samplenum, [A.ERROR, ['INVALID IDLE', 'INV IDLE', 'II']])
+						else:
+							self.bits += 1
+					else:
+						# Pull the next bit (NB, this means the result value is in big bit endian!!)
+						self.request <<= 1
+						self.request |= swdio
+						self.request &= 0xff
+						# Check if the sequence finally matched one of the activation sequences
+						if self.request == 0x58:
+							# SWD selected -> go to happy place idle
+							self.state = DecoderState.reset
+							self.bits = 0
+							self.annotateBits(self.startSample, self.samplenum, [A.ENABLE, ['ACTIVATE SWD', 'ACTIVATE', 'AS']])
+							self.startSample = self.samplenum
+						elif self.request == 0x50:
+							# JTAG selected -> go to unknown till we see a line reset
+							self.state = DecoderState.unknown
+							self.annotateBits(self.startSample, self.samplenum, [A.ENABLE, ['ACTIVATE JTAG', 'ACTIVATE', 'AJ']])
 
 	def decode(self):
 		while True:
