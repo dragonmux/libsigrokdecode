@@ -120,6 +120,7 @@ class Decoder(srd.Decoder):
 		self.state = DecoderState.unknown
 		self.startSample = 0
 		self.request = 0
+		self.ack = 0
 		self.bits = 0
 
 	def start(self):
@@ -148,11 +149,14 @@ class Decoder(srd.Decoder):
 			self.state = DecoderState.reset
 			return
 
+		# Figure out if this is an AP or a DP access
+		target = 'DP' if (self.request & (1 << 1)) == 0 else 'AP'
+
 		# Determine if this is a read or a write
-		if self.request & (1 << 3):
-			self.annotateBits(self.startSample, self.samplenum, [A.READ, [f'{self.request:x}']])
+		if (self.request & (1 << 2)) != 0:
+			self.annotateBits(self.startSample, self.samplenum, [A.READ, [f'{target} READ', f'{target} RD', f'{target[0]}R']])
 		else:
-			self.annotateBits(self.startSample, self.samplenum, [A.WRITE, [f'{self.request:x}']])
+			self.annotateBits(self.startSample, self.samplenum, [A.WRITE, [f'{target} WRITE', f'{target} WR', f'{target[0]}W']])
 		self.state = DecoderState.ackTurnaround
 
 	def handle_swclk_edge(self, swclk, swdio):
@@ -163,6 +167,7 @@ class Decoder(srd.Decoder):
 					self.startSample = self.samplenum
 					self.bits = 1
 					self.state = Decoder.reset
+
 			case DecoderState.idle:
 				# If this is the rising edge of the clock, check to see if we are leaving idle
 				if swclk == 1 and swdio == 1:
@@ -171,6 +176,7 @@ class Decoder(srd.Decoder):
 					self.bits = 1
 					self.annotateBits(self.startSample, self.samplenum, [A.IDLE, ['IDLE', 'I']])
 					self.startSample = self.samplenum
+
 			case DecoderState.reset:
 				# line reset only cares about the line being kept high on rising edges
 				if swclk == 1:
@@ -185,15 +191,17 @@ class Decoder(srd.Decoder):
 						# If we do not, then we're now back in an unknown state
 						else:
 							self.state = DecoderState.unknown
+
 			case DecoderState.request:
 				# Consume the next bit on the rising edge of the clock
 				if swclk == 1:
 					self.request >>= 1
 					self.request |= (swdio << 7)
 					self.bits += 1
+				elif self.bits == 8:
 					# If we've now consumed a full request's worth of bits, figure out what it is we got
-					if self.bits == 8:
-						self.handle_request()
+					self.handle_request()
+
 			case DecoderState.ackTurnaround:
 				# If we saw the rising edge of the turnaround clock edge, start pulling in the ACK bits
 				if swclk == 1:
