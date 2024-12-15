@@ -221,7 +221,7 @@ class Decoder(srd.Decoder):
 	)
 
 	def __init__(self):
-		self.devices: list[JTAGDevice] = []
+		self.devices = list[JTAGDevice]()
 
 	def reset(self):
 		self.state = DecoderState.inactive
