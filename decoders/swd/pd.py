@@ -141,11 +141,10 @@ class Decoder(srd.Decoder):
 			self.state = DecoderState.selectionAlert
 			self.request <<= 120
 			self.bits += 1
-			print(f'Selection Alert begin: {self.request:x} {self.bits}')
 			return
 
 		# If the stop bit is high, then this was actually a part of a line reset (probably?)
-		if (self.request & (1 << 7)) != 0:
+		if (self.request & (1 << 6)) != 0:
 			self.state = DecoderState.reset
 			return
 
@@ -206,24 +205,24 @@ class Decoder(srd.Decoder):
 			case DecoderState.selectionAlert:
 				# Consume the next bit on the rising edge of the clock
 				if swclk == 1:
-					self.request >>= 1
-					self.request |= (swdio << 127)
-					self.bits += 1
 					# Check we've got a complete sequence
-					if self.bits == 127:
-						self.request >>= 1
+					if self.bits == 128:
 						# Is it a valid Alert Sequence?
 						if self.request == 0x19bc0ea2e3ddafe986852d956209f392:
 							# Mark it, wait for the activation sequence
 							self.state = DecoderState.activation
-							self.request = 0
-							self.bits = 0
+							self.request = swdio
+							self.bits = 1
 							self.annotateBits(self.startSample, self.samplenum, [A.ENABLE, ['ALERT SEQUENCE', 'ALERT', 'AS']])
 							self.startSample = self.samplenum
 						else:
 							# We got an invalid sequence, mark the error and go to the unknown state
 							self.state = DecoderState.unknown
 							self.annotateBits(self.startSample, self.samplenum, [A.ERROR, [f'INVALID SEQUENCE {self.request:x}', 'INV SEQ', 'IS']])
+					else:
+						self.request >>= 1
+						self.request |= (swdio << 127)
+						self.bits += 1
 
 			case DecoderState.activation:
 				if swclk == 1:
@@ -236,10 +235,6 @@ class Decoder(srd.Decoder):
 						else:
 							self.bits += 1
 					else:
-						# Pull the next bit (NB, this means the result value is in big bit endian!!)
-						self.request <<= 1
-						self.request |= swdio
-						self.request &= 0xff
 						# Check if the sequence finally matched one of the activation sequences
 						if self.request == 0x58:
 							# SWD selected -> go to happy place idle
@@ -251,6 +246,11 @@ class Decoder(srd.Decoder):
 							# JTAG selected -> go to unknown till we see a line reset
 							self.state = DecoderState.unknown
 							self.annotateBits(self.startSample, self.samplenum, [A.ENABLE, ['ACTIVATE JTAG', 'ACTIVATE', 'AJ']])
+						else:
+							# Pull the next bit (NB, this means the result value is in big bit endian!!)
+							self.request <<= 1
+							self.request |= swdio
+							self.request &= 0xff
 
 	def decode(self):
 		while True:
