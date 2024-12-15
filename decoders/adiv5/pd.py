@@ -28,11 +28,12 @@ class Annotations:
 	'''Annotation and binary output classes.'''
 	(
 		TRANS_EVEN, TRANS_ODD,
-	) = range(2)
+		READ, WRITE, OK, WAIT, FAULT, NO_RESPONSE
+	) = range(8)
 A = Annotations
 
 ADIv5Op = Literal['DP_READ', 'DP_WRITE', 'AP_READ', 'AP_WRITE']
-ADIv5Ack = Literal['OK', 'WAIT', 'FAULT', 'NO-RESPONSE']
+ADIv5AckLiteral = Literal['OK', 'WAIT', 'FAULT', 'NO-RESPONSE']
 
 @unique
 class ADIv5Target(Enum):
@@ -59,7 +60,7 @@ class ADIv5APKind(Enum):
 	unknown = auto()
 
 class ADIv5Transaction:
-	def __init__(self, op: ADIv5Op, dp: int, addr: int, reg: str, ack: ADIv5Ack, data: int):
+	def __init__(self, op: ADIv5Op, dp: int, addr: int, reg: str, ack: ADIv5AckLiteral, data: int):
 		target, rnw = op.split('_')
 		self.target = ADIv5Target.ap if target == 'AP' else ADIv5Target.dp
 		self.rnw = ADIv5RnW.read if rnw == 'READ' else ADIv5RnW.write
@@ -281,7 +282,7 @@ class Decoder(srd.Decoder):
 	)
 
 	def __init__(self):
-		self.dp: dict[int, ADIv5DP] = {}
+		self.dp = dict[int, ADIv5DP]()
 
 	def reset(self):
 		self.transactCount = 0
@@ -294,16 +295,26 @@ class Decoder(srd.Decoder):
 	def annotate(self, begin: int, end: int, data: list[int | list[str]]):
 		self.put(begin, end, self.outputAnnotation, data)
 
-	def decode(self, beginSample: int, endSample: int, transact: tuple[ADIv5Op, int, int, str, ADIv5Ack, int]):
+	def decode(self, beginSample: int, endSample: int, data: tuple[ADIv5Op, int, int, str, ADIv5AckLiteral, int]):
 		'''Take a transaction from the ADIv5 de-encapsulation decoder and turn it into part of a logical transaction'''
 		# Unpack the transaction
-		op, dp, addr, reg, ack, data = transact
-		target, op = op.split('_')
+		transaction = ADIv5Transaction(*data)
 
 		# Figure out which transaction line to display it and convert the transaction into an annotation
 		line = A.TRANS_EVEN if (self.transactCount & 1) == 0 else A.TRANS_ODD
 		self.transactCount += 1
-		targetName = f'DP{dp}'
-		if target == 'AP':
+		targetName = f'DP{transaction.dp}'
+		if transaction.target == ADIv5Target.ap:
 			targetName += ' AP'
-		self.annotate(beginSample, endSample, [line, [f'{targetName} {op.lower()} {reg}: {data:08x}']])
+		self.annotate(beginSample, endSample,
+			[line, [f'{targetName} {transaction.rnw.name} {transaction.register[0]}: {transaction.data:08x}']])
+
+		# If the transation failed for some reason, handle that and return
+		if transaction.ack != ADIv5Ack.ok:
+			return
+
+		# If the DP for this transaction is not yet known, make a new DP instance
+		dp = self.dp.get(transaction.dp)
+		if dp is None:
+			dp = self.dp[transaction.dp] = ADIv5DP()
+		dp.decodeTransaction(transaction)
