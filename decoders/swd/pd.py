@@ -243,6 +243,28 @@ class Decoder(srd.Decoder):
 			)
 			self.startSample = self.samplenum
 
+	def handleSelectionAlert(self, swclk: Bit, swdio: Bit):
+		# Consume the next bit on the rising edge of the clock
+		if swclk == 1:
+			# Check we've got a complete sequence
+			if self.bits == 128:
+				# Is it a valid Alert Sequence?
+				if self.request == 0x19bc0ea2e3ddafe986852d956209f392:
+					# Mark it, wait for the activation sequence
+					self.state = DecoderState.activation
+					self.request = swdio
+					self.bits = 1
+					self.annotateBits(self.startSample, self.samplenum, [A.ENABLE, ['ALERT SEQUENCE', 'ALERT', 'AS']])
+					self.startSample = self.samplenum
+				else:
+					# We got an invalid sequence, mark the error and go to the unknown state
+					self.state = DecoderState.unknown
+					self.annotateBits(self.startSample, self.samplenum, [A.ERROR, [f'INVALID SEQUENCE {self.request:x}', 'INV SEQ', 'IS']])
+			else:
+				self.request >>= 1
+				self.request |= (swdio << 127)
+				self.bits += 1
+
 	def handleClkEdge(self, swclk: Bit, swdio: Bit):
 		match self.state:
 			case DecoderState.unknown:
@@ -259,26 +281,7 @@ class Decoder(srd.Decoder):
 				self.handleAck(swclk, swdio)
 
 			case DecoderState.selectionAlert:
-				# Consume the next bit on the rising edge of the clock
-				if swclk == 1:
-					# Check we've got a complete sequence
-					if self.bits == 128:
-						# Is it a valid Alert Sequence?
-						if self.request == 0x19bc0ea2e3ddafe986852d956209f392:
-							# Mark it, wait for the activation sequence
-							self.state = DecoderState.activation
-							self.request = swdio
-							self.bits = 1
-							self.annotateBits(self.startSample, self.samplenum, [A.ENABLE, ['ALERT SEQUENCE', 'ALERT', 'AS']])
-							self.startSample = self.samplenum
-						else:
-							# We got an invalid sequence, mark the error and go to the unknown state
-							self.state = DecoderState.unknown
-							self.annotateBits(self.startSample, self.samplenum, [A.ERROR, [f'INVALID SEQUENCE {self.request:x}', 'INV SEQ', 'IS']])
-					else:
-						self.request >>= 1
-						self.request |= (swdio << 127)
-						self.bits += 1
+				self.handleSelectionAlert(swclk, swdio)
 
 			case DecoderState.activation:
 				if swclk == 1:
