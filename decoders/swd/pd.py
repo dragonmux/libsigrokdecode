@@ -21,6 +21,7 @@
 import sigrokdecode as srd
 import re
 from enum import Enum, unique, auto
+from typing import Literal
 
 '''
 OUTPUT_PYTHON format:
@@ -38,6 +39,8 @@ Packet:
 <pdata>:
   - tuple of address, ack state, data for the given sequence
 '''
+
+Bit = Literal[0, 1]
 
 @unique
 class DecoderState(Enum):
@@ -159,7 +162,7 @@ class Decoder(srd.Decoder):
 			self.annotateBits(self.startSample, self.samplenum, [A.WRITE, [f'{target} WRITE', f'{target} WR', f'{target[0]}W']])
 		self.state = DecoderState.ackTurnaround
 
-	def handle_swclk_edge(self, swclk, swdio):
+	def handle_swclk_edge(self, swclk: Bit, swdio: Bit):
 		match self.state:
 			case DecoderState.unknown:
 				# If we're waiting on a line reset, then look only for a rising edge with swdio high
