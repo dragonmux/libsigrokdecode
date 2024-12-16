@@ -18,6 +18,7 @@
 ##
 
 from enum import Enum, IntEnum, unique, auto
+from typing import Literal
 from .pd import JTAGDevice, A
 
 @unique
@@ -44,7 +45,7 @@ class ADIv5Target(Enum):
 	dp = auto()
 
 	@property
-	def name(self):
+	def name(self) -> Literal['AP', 'DP']:
 		return super().name.upper()
 
 class ADIv5RnW(IntEnum):
@@ -57,7 +58,7 @@ class ADIv5Ack(IntEnum):
 	fault = 4
 
 	@property
-	def name(self):
+	def name(self) -> Literal['OK', 'WAIT', 'FAULT']:
 		return super().name.upper()
 
 	@property
@@ -288,7 +289,8 @@ class ADIv5Decoder:
 		)
 		# With that decoded, annotate the request as a command
 		deviceIndex = self.device.deviceIndex
-		dpIndex: int = self.device.dpIndex
+		dpIndex = self.device.dpIndex
+		assert dpIndex is not None
 		target = self.state.target
 		if self.state == ADIv5State.apAccess:
 			target = f'AP{self.select.apsel} {target}'
@@ -326,9 +328,11 @@ class ADIv5Decoder:
 		self.device.decoder.annotateBit(begin, [A.ADIV5_WRITE, ['Write', 'WR', 'W']])
 		self.device.decoder.annotateBits(begin + 1, begin + 2, [A.ADIV5_REGISTER, ['ABORT', 'ABT']])
 		self.device.decoder.annotateBits(begin + 3, end, [A.ADIV5_REQUEST, [f'{transaction.request:08x}']])
+		dpIndex = self.device.dpIndex
+		assert dpIndex is not None
 		# And emit it to the next decoder in the stack
 		self.device.decoder.emit(transaction.sampleInterval,
-			('DP_WRITE', self.device.dpIndex, 0x00, 'ABORT', transaction.ack.name, transaction.request))
+			('DP_WRITE', dpIndex, 0x00, 'ABORT', transaction.ack.name, transaction.request))
 
 	def decodeResponse(self, begin: int, end: int, transaction: ADIv5Transaction):
 		# Determine the state of the previous transaction and annotate it to the response track
@@ -342,12 +346,14 @@ class ADIv5Decoder:
 				# If this response is for an AP read transaction, feed it into the AP handler
 				if transaction.ack == ADIv5Ack.ok and self.transaction.target == ADIv5Target.ap:
 					self.ap[self.select.apsel].handleRegRead(self.transaction.register[0], transaction.response)
+				dpIndex = self.device.dpIndex
+				assert dpIndex is not None
 				# Emit the read into the next decoder up the stack now we have everything
 				# (though filter out RDBUFF requests as they're no-ops in the JTAG-DP protocol
 				# used to get the response of the previous request)
 				if self.transaction.register[1] != 'RDBUFF':
 					self.device.decoder.emit((self.transaction.sampleInterval[0], transaction.sampleInterval[1]), (
-						f'{self.transaction.target.name}_READ', self.device.dpIndex, *self.transaction.register,
+						f'{self.transaction.target.name}_READ', dpIndex, *self.transaction.register,
 						transaction.ack.name, transaction.response
 					))
 			else:
