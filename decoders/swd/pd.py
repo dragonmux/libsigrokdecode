@@ -163,6 +163,35 @@ class Decoder(srd.Decoder):
 			self.annotateBits(self.startSample, self.samplenum, [A.WRITE, [f'{target} WRITE', f'{target} WR', f'{target[0]}W']])
 		self.state = DecoderState.ackTurnaround
 
+	def processAck(self):
+		match self.ack:
+			# OK Ack
+			case 1:
+				# If this is a write, we have one more turnaround to do - otherwise it's into
+				# the data phase for a read.
+				if (self.request & (1 << 2)) == 1:
+					self.state = DecoderState.dataRead
+				else:
+					self.state = DecoderState.dataTurnaround
+					self.bits = 0
+			# WAIT Ack
+			case 2:
+				# No further cycles to go, just idle time.. back to the idle state we go!
+				self.state = DecoderState.idle
+			# FAULT Ack
+			case 4:
+				# Similarly to WAIT, we're done.. back to idle
+				self.state = DecoderState.idle
+			# NO-RESPONSE Ack
+			case 7:
+				# If the request is to TARGETSEL, we actually now have a write that occurs, selecting
+				# a target on the bus. This must be after a fresh line reset.
+				# XXX: Handle this properly.. this needs further work
+				self.state = DecoderState.idle
+			# Anything else is a protocol error
+			case _:
+				self.state = DecoderState.unknown
+
 	def handleUnknown(self, swclk: Bit, swdio: Bit):
 		# If we're waiting on a line reset, then look only for a rising edge with swdio high
 		if swclk == 1 and swdio == 1:
@@ -219,14 +248,7 @@ class Decoder(srd.Decoder):
 			self.ack |= (swdio << 2)
 			self.bits += 1
 		elif self.bits == 3:
-			# If this is a write, we have one more turnaround to do - otherwise it's into
-			# the data phase for a read.
-			if (self.request & (1 << 2)) == 1:
-				self.state = DecoderState.dataRead
-			else:
-				self.state = DecoderState.dataTurnaround
-				self.bits = 0
-
+			# Figure out what kind of ACK this was and annotate it
 			self.annotateBits(
 				self.startSample, self.samplenum,
 				[
@@ -242,6 +264,8 @@ class Decoder(srd.Decoder):
 				]
 			)
 			self.startSample = self.samplenum
+			# Now turn the ack into an appropriate state change
+			self.processAck()
 
 	def handleSelectionAlert(self, swclk: Bit, swdio: Bit):
 		# Consume the next bit on the rising edge of the clock
