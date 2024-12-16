@@ -212,6 +212,37 @@ class Decoder(srd.Decoder):
 			self.state = DecoderState.ack
 			self.startSample = self.samplenum
 
+	def handleAck(self, swclk: Bit, swdio: Bit):
+		# Sample the ACK bits on the falling edges
+		if swclk == 0:
+			self.ack >>= 1
+			self.ack |= (swdio << 2)
+			self.bits += 1
+		elif self.bits == 3:
+			# If this is a write, we have one more turnaround to do - otherwise it's into
+			# the data phase for a read.
+			if (self.request & (1 << 2)) == 1:
+				self.state = DecoderState.dataRead
+			else:
+				self.state = DecoderState.dataTurnaround
+				self.bits = 0
+
+			self.annotateBits(
+				self.startSample, self.samplenum,
+				[
+					A.ACK,
+					[
+						{
+							1: 'OK',
+							2: 'WAIT',
+							4: 'FAULT',
+							7: 'NO-RESPONSE'
+						}.get(self.ack, 'UNKNOWN')
+					]
+				]
+			)
+			self.startSample = self.samplenum
+
 	def handleClkEdge(self, swclk: Bit, swdio: Bit):
 		match self.state:
 			case DecoderState.unknown:
@@ -224,37 +255,8 @@ class Decoder(srd.Decoder):
 				self.handleRequest(swclk, swdio)
 			case DecoderState.ackTurnaround:
 				self.handleAckTurnaround(swclk, swdio)
-
 			case DecoderState.ack:
-				# Sample the ACK bits on the falling edges
-				if swclk == 0:
-					self.ack >>= 1
-					self.ack |= (swdio << 2)
-					self.bits += 1
-				elif self.bits == 3:
-					# If this is a write, we have one more turnaround to do - otherwise it's into
-					# the data phase for a read.
-					if (self.request & (1 << 2)) == 1:
-						self.state = DecoderState.dataRead
-					else:
-						self.state = DecoderState.dataTurnaround
-						self.bits = 0
-
-					self.annotateBits(
-						self.startSample, self.samplenum,
-						[
-							A.ACK,
-							[
-								{
-									1: 'OK',
-									2: 'WAIT',
-									4: 'FAULT',
-									7: 'NO-RESPONSE'
-								}.get(self.ack, 'UNKNOWN')
-							]
-						]
-					)
-					self.startSample = self.samplenum
+				self.handleAck(swclk, swdio)
 
 			case DecoderState.selectionAlert:
 				# Consume the next bit on the rising edge of the clock
