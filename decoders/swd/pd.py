@@ -206,11 +206,42 @@ class Decoder(srd.Decoder):
 					self.handle_request()
 
 			case DecoderState.ackTurnaround:
-				# If we saw the rising edge of the turnaround clock edge, start pulling in the ACK bits
-				if swclk == 1:
-					self.bits = 0
-					self.ack = 0
+				# If we saw the falling edge of the turnaround clock edge, start pulling in the ACK bits
+				if swclk == 0:
+					self.bits = 1
+					self.ack = (swdio << 2)
 					self.state = DecoderState.ack
+					self.startSample = self.samplenum
+
+			case DecoderState.ack:
+				# Sample the ACK bits on the falling edges
+				if swclk == 0:
+					self.ack >>= 1
+					self.ack |= (swdio << 2)
+					self.bits += 1
+				elif self.bits == 3:
+					# If this is a write, we have one more turnaround to do - otherwise it's into
+					# the data phase for a read.
+					if (self.request & (1 << 2)) == 1:
+						self.state = DecoderState.dataRead
+					else:
+						self.state = DecoderState.dataTurnaround
+						self.bits = 0
+
+					self.annotateBits(
+						self.startSample, self.samplenum,
+						[
+							A.ACK,
+							[
+								{
+									1: 'OK',
+									2: 'WAIT',
+									4: 'FAULT',
+									7: 'NO-RESPONSE'
+								}.get(self.ack, 'UNKNOWN')
+							]
+						]
+					)
 					self.startSample = self.samplenum
 
 			case DecoderState.selectionAlert:
