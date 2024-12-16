@@ -204,6 +204,14 @@ class Decoder(srd.Decoder):
 			# If we've now consumed a full request's worth of bits, figure out what it is we got
 			self.processRequest()
 
+	def handleAckTurnaround(self, swclk: Bit, swdio: Bit):
+		# If we saw the falling edge of the turnaround clock cycle, start pulling in the ACK bits
+		if swclk == 0:
+			self.bits = 1
+			self.ack = (swdio << 2)
+			self.state = DecoderState.ack
+			self.startSample = self.samplenum
+
 	def handleClkEdge(self, swclk: Bit, swdio: Bit):
 		match self.state:
 			case DecoderState.unknown:
@@ -214,14 +222,8 @@ class Decoder(srd.Decoder):
 				self.handleReset(swclk, swdio)
 			case DecoderState.request:
 				self.handleRequest(swclk, swdio)
-
 			case DecoderState.ackTurnaround:
-				# If we saw the falling edge of the turnaround clock edge, start pulling in the ACK bits
-				if swclk == 0:
-					self.bits = 1
-					self.ack = (swdio << 2)
-					self.state = DecoderState.ack
-					self.startSample = self.samplenum
+				self.handleAckTurnaround(swclk, swdio)
 
 			case DecoderState.ack:
 				# Sample the ACK bits on the falling edges
