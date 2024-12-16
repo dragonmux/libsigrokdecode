@@ -162,7 +162,7 @@ class Decoder(srd.Decoder):
 			self.annotateBits(self.startSample, self.samplenum, [A.WRITE, [f'{target} WRITE', f'{target} WR', f'{target[0]}W']])
 		self.state = DecoderState.ackTurnaround
 
-	def handle_unknown(self, swclk: Bit, swdio: Bit):
+	def handleUnknown(self, swclk: Bit, swdio: Bit):
 		# If we're waiting on a line reset, then look only for a rising edge with swdio high
 		if swclk == 1 and swdio == 1:
 			self.startSample = self.samplenum
@@ -172,7 +172,7 @@ class Decoder(srd.Decoder):
 	def handleClkEdge(self, swclk: Bit, swdio: Bit):
 		match self.state:
 			case DecoderState.unknown:
-				self.handle_unknown(swclk, swdio)
+				self.handleUnknown(swclk, swdio)
 
 			case DecoderState.idle:
 				# If this is the rising edge of the clock, check to see if we are leaving idle
