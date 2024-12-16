@@ -125,6 +125,8 @@ class Decoder(srd.Decoder):
 		self.request = 0
 		self.ack = 0
 		self.data = 0
+		self.computedParity = 0
+		self.actualParity = 0
 		self.bits = 0
 
 	def start(self):
@@ -169,8 +171,10 @@ class Decoder(srd.Decoder):
 			case 1:
 				# If this is a write, we have one more turnaround to do - otherwise it's into
 				# the data phase for a read.
-				if (self.request & (1 << 2)) == 1:
+				if (self.request & (1 << 2)) != 0:
 					self.state = DecoderState.dataRead
+					self.data = 0
+					self.computedParity = 0
 					self.bits = 0
 				else:
 					self.state = DecoderState.dataTurnaround
@@ -271,8 +275,37 @@ class Decoder(srd.Decoder):
 		# If we saw the rising edge of the turnaround cycle, start pulling in data bits
 		if swclk == 1:
 			self.bits = 0
+			self.data = 0
+			self.computedParity = 0
 			self.state = DecoderState.dataWrite
 			self.startSample = self.samplenum
+
+	def handleDataRead(self, swclk: Bit, swdio: Bit):
+		# Sample the data on the falling edges
+		if swclk == 0:
+			# If this is a data bit, shuffle it into the data collection
+			if self.bits < 32:
+				self.data >>= 1
+				self.data |= (swdio << 31)
+				self.computedParity ^= swdio
+			# Otherwise grab the pairty bit
+			else:
+				self.actualParity = swdio
+			self.bits += 1
+		else:
+			# If we have all the data bits, annotate
+			if self.bits == 32:
+				self.annotateBits(self.startSample, self.samplenum, [A.DATA, [f'{self.data:08x}']])
+				self.startSample = self.samplenum
+			# If we now also have the parity bit, then check what state the parity result is, annotate, and idle
+			elif self.bits == 33:
+				parity = 'OK' if self.computedParity == swdio else 'ERROR'
+				self.annotateBits(
+					self.startSample, self.samplenum,
+					[A.PARITY, [f'PARITY {parity}', parity, parity[0]]]
+				)
+				self.state = DecoderState.idle
+				self.startSample = self.samplenum
 
 	def handleSelectionAlert(self, swclk: Bit, swdio: Bit):
 		# Consume the next bit on the rising edge of the clock
@@ -340,6 +373,8 @@ class Decoder(srd.Decoder):
 				self.handleAck(swclk, swdio)
 			case DecoderState.dataTurnaround:
 				self.handleDataTurnaround(swclk, swdio)
+			case DecoderState.dataRead:
+				self.handleDataRead(swclk, swdio)
 
 			case DecoderState.selectionAlert:
 				self.handleSelectionAlert(swclk, swdio)
