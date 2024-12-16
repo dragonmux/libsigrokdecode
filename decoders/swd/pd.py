@@ -54,6 +54,7 @@ class DecoderState(Enum):
 	dataRead = auto()
 	dataWrite = auto()
 	parity = auto()
+	sync = auto()
 	idleTurnaround = auto()
 	selectionAlert = auto()
 	activation = auto()
@@ -182,11 +183,11 @@ class Decoder(srd.Decoder):
 			# WAIT Ack
 			case 2:
 				# Nothing more to do, just wait for the final turnaround for bus idle, and idle
-				self.state = DecoderState.idleTurnaround
+				self.state = DecoderState.sync
 			# FAULT Ack
 			case 4:
 				# Similarly to WAIT, we're done.. wait for idle
-				self.state = DecoderState.idleTurnaround
+				self.state = DecoderState.sync
 			# NO-RESPONSE Ack
 			case 7:
 				# If the request is to TARGETSEL, we actually now have a write that occurs, selecting
@@ -334,6 +335,12 @@ class Decoder(srd.Decoder):
 			)
 			self.state = DecoderState.idleTurnaround
 
+	def handleSync(self, swclk: Bit):
+		# If we just saw a falling edge, we're finally properly done with the ACK bits and can now do the
+		# bus idle turnaround cycle handling
+		if swclk == 0:
+			self.state = DecoderState.idleTurnaround
+
 	def handleIdleTurnaround(self, swclk: Bit):
 		# Once we see the falling edge, we can relax and go to idle
 		if swclk == 0:
@@ -412,6 +419,8 @@ class Decoder(srd.Decoder):
 				self.handleDataWrite(swclk, swdio)
 			case DecoderState.parity:
 				self.handleParity(swclk)
+			case DecoderState.sync:
+				self.handleSync(swclk)
 			case DecoderState.idleTurnaround:
 				self.handleIdleTurnaround(swclk)
 			case DecoderState.selectionAlert:
