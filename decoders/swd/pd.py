@@ -179,27 +179,29 @@ class Decoder(srd.Decoder):
 			self.annotateBits(self.startSample, self.samplenum, [A.IDLE, ['IDLE', 'I']])
 			self.startSample = self.samplenum
 
+	def handleReset(self, swclk: Bit, swdio: Bit):
+		# line reset only cares about the line being kept high on rising edges
+		if swclk == 1:
+			if swdio == 1:
+				self.bits += 1
+			else:
+				# Check if we've got enough bits to consider this line reset
+				if self.bits >= 50:
+					self.state = DecoderState.idle
+					self.annotateBits(self.startSample, self.samplenum, [A.RESET, ['LINE RESET', 'LN RST', 'LR']])
+					self.startSample = self.samplenum
+				# If we do not, then we're now back in an unknown state
+				else:
+					self.state = DecoderState.unknown
+
 	def handleClkEdge(self, swclk: Bit, swdio: Bit):
 		match self.state:
 			case DecoderState.unknown:
 				self.handleUnknown(swclk, swdio)
 			case DecoderState.idle:
 				self.handleIdle(swclk, swdio)
-
 			case DecoderState.reset:
-				# line reset only cares about the line being kept high on rising edges
-				if swclk == 1:
-					if swdio == 1:
-						self.bits += 1
-					else:
-						# Check if we've got enough bits to consider this line reset
-						if self.bits >= 50:
-							self.state = DecoderState.idle
-							self.annotateBits(self.startSample, self.samplenum, [A.RESET, ['LINE RESET', 'LN RST', 'LR']])
-							self.startSample = self.samplenum
-						# If we do not, then we're now back in an unknown state
-						else:
-							self.state = DecoderState.unknown
+				self.handleReset(swclk, swdio)
 
 			case DecoderState.request:
 				# Consume the next bit on the rising edge of the clock
