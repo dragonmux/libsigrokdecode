@@ -171,9 +171,9 @@ class Decoder(srd.Decoder):
 				# the data phase for a read.
 				if (self.request & (1 << 2)) == 1:
 					self.state = DecoderState.dataRead
+					self.bits = 0
 				else:
 					self.state = DecoderState.dataTurnaround
-					self.bits = 0
 			# WAIT Ack
 			case 2:
 				# No further cycles to go, just idle time.. back to the idle state we go!
@@ -267,6 +267,13 @@ class Decoder(srd.Decoder):
 			# Now turn the ack into an appropriate state change
 			self.processAck()
 
+	def handleDataTurnaround(self, swclk: Bit, swdio: Bit):
+		# If we saw the rising edge of the turnaround cycle, start pulling in data bits
+		if swclk == 1:
+			self.bits = 0
+			self.state = DecoderState.dataWrite
+			self.startSample = self.samplenum
+
 	def handleSelectionAlert(self, swclk: Bit, swdio: Bit):
 		# Consume the next bit on the rising edge of the clock
 		if swclk == 1:
@@ -331,6 +338,8 @@ class Decoder(srd.Decoder):
 				self.handleAckTurnaround(swclk, swdio)
 			case DecoderState.ack:
 				self.handleAck(swclk, swdio)
+			case DecoderState.dataTurnaround:
+				self.handleDataTurnaround(swclk, swdio)
 
 			case DecoderState.selectionAlert:
 				self.handleSelectionAlert(swclk, swdio)
