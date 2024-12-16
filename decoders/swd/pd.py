@@ -291,21 +291,23 @@ class Decoder(srd.Decoder):
 			# Otherwise grab the pairty bit
 			else:
 				self.actualParity = swdio
+				self.state = DecoderState.parity
 			self.bits += 1
 		else:
 			# If we have all the data bits, annotate
 			if self.bits == 32:
 				self.annotateBits(self.startSample, self.samplenum, [A.DATA, [f'{self.data:08x}']])
 				self.startSample = self.samplenum
-			# If we now also have the parity bit, then check what state the parity result is, annotate, and idle
-			elif self.bits == 33:
-				parity = 'OK' if self.computedParity == swdio else 'ERROR'
-				self.annotateBits(
-					self.startSample, self.samplenum,
-					[A.PARITY, [f'PARITY {parity}', parity, parity[0]]]
-				)
-				self.state = DecoderState.idle
-				self.startSample = self.samplenum
+
+	def handleParity(self):
+		# we now have the parity bit, check what state the parity result is, annotate, and idle
+		parity = 'OK' if self.computedParity == self.actualParity else 'ERROR'
+		self.annotateBits(
+			self.startSample, self.samplenum,
+			[A.PARITY, [f'PARITY {parity}', parity, parity[0]]]
+		)
+		self.state = DecoderState.idle
+		self.startSample = self.samplenum
 
 	def handleSelectionAlert(self, swclk: Bit, swdio: Bit):
 		# Consume the next bit on the rising edge of the clock
@@ -376,6 +378,8 @@ class Decoder(srd.Decoder):
 			case DecoderState.dataRead:
 				self.handleDataRead(swclk, swdio)
 
+			case DecoderState.parity:
+				self.handleParity()
 			case DecoderState.selectionAlert:
 				self.handleSelectionAlert(swclk, swdio)
 			case DecoderState.activation:
