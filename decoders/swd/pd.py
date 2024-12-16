@@ -124,6 +124,7 @@ class Decoder(srd.Decoder):
 		self.startSample = 0
 		self.request = 0
 		self.ack = 0
+		self.data = 0
 		self.bits = 0
 
 	def start(self):
@@ -169,19 +170,21 @@ class Decoder(srd.Decoder):
 			self.bits = 1
 			self.state = Decoder.reset
 
+	def handleIdle(self, swclk: Bit, swdio: Bit):
+		# If this is the rising edge of the clock, check to see if we are leaving idle
+		if swclk == 1 and swdio == 1:
+			self.state = DecoderState.request
+			self.request = 0x80
+			self.bits = 1
+			self.annotateBits(self.startSample, self.samplenum, [A.IDLE, ['IDLE', 'I']])
+			self.startSample = self.samplenum
+
 	def handleClkEdge(self, swclk: Bit, swdio: Bit):
 		match self.state:
 			case DecoderState.unknown:
 				self.handleUnknown(swclk, swdio)
-
 			case DecoderState.idle:
-				# If this is the rising edge of the clock, check to see if we are leaving idle
-				if swclk == 1 and swdio == 1:
-					self.state = DecoderState.request
-					self.request = 0x80
-					self.bits = 1
-					self.annotateBits(self.startSample, self.samplenum, [A.IDLE, ['IDLE', 'I']])
-					self.startSample = self.samplenum
+				self.handleIdle(swclk, swdio)
 
 			case DecoderState.reset:
 				# line reset only cares about the line being kept high on rising edges
