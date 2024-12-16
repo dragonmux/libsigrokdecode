@@ -175,9 +175,9 @@ class Decoder(srd.Decoder):
 					self.state = DecoderState.dataRead
 					self.data = 0
 					self.computedParity = 0
-					self.bits = 0
 				else:
 					self.state = DecoderState.dataTurnaround
+				self.bits = 0
 			# WAIT Ack
 			case 2:
 				# No further cycles to go, just idle time.. back to the idle state we go!
@@ -271,14 +271,17 @@ class Decoder(srd.Decoder):
 			# Now turn the ack into an appropriate state change
 			self.processAck()
 
-	def handleDataTurnaround(self, swclk: Bit, swdio: Bit):
-		# If we saw the rising edge of the turnaround cycle, start pulling in data bits
-		if swclk == 1:
-			self.bits = 0
-			self.data = 0
-			self.computedParity = 0
-			self.state = DecoderState.dataWrite
-			self.startSample = self.samplenum
+	def handleDataTurnaround(self, swclk: Bit):
+		# If we saw the falling edge of the turnaround cycle, start pulling in data bits
+		if swclk == 0:
+			if self.bits == 1:
+				self.bits = 0
+				self.data = 0
+				self.computedParity = 0
+				self.state = DecoderState.dataWrite
+				self.startSample = self.samplenum
+			else:
+				self.bits += 1
 
 	def handleDataRead(self, swclk: Bit, swdio: Bit):
 		# Sample the data on the falling edges
@@ -299,15 +302,36 @@ class Decoder(srd.Decoder):
 				self.annotateBits(self.startSample, self.samplenum, [A.DATA, [f'{self.data:08x}']])
 				self.startSample = self.samplenum
 
-	def handleParity(self):
-		# we now have the parity bit, check what state the parity result is, annotate, and idle
-		parity = 'OK' if self.computedParity == self.actualParity else 'ERROR'
-		self.annotateBits(
-			self.startSample, self.samplenum,
-			[A.PARITY, [f'PARITY {parity}', parity, parity[0]]]
-		)
-		self.state = DecoderState.idle
-		self.startSample = self.samplenum
+	def handleDataWrite(self, swclk: Bit, swdio: Bit):
+		# Sample the data on the rising edges
+		if swclk == 1:
+			# If this is a data bit, shuffle it into the data collection
+			if self.bits < 32:
+				self.data >>= 1
+				self.data |= (swdio << 31)
+				self.computedParity ^= swdio
+			# Otherwise grab the pairty bit
+			else:
+				self.actualParity = swdio
+				self.state = DecoderState.parity
+			self.bits += 1
+		else:
+			# If we have all the data bits, annotate
+			if self.bits == 32:
+				self.annotateBits(self.startSample, self.samplenum, [A.DATA, [f'{self.data:08x}']])
+				self.startSample = self.samplenum
+
+	def handleParity(self, swclk: Bit):
+		# Make sure this is a falling clock edge
+		if swclk == 0:
+			# We now have the parity bit, check what state the parity result is, annotate, and idle
+			parity = 'OK' if self.computedParity == self.actualParity else 'ERROR'
+			self.annotateBits(
+				self.startSample, self.samplenum,
+				[A.PARITY, [f'PARITY {parity}', parity, parity[0]]]
+			)
+			self.state = DecoderState.idle
+			self.startSample = self.samplenum
 
 	def handleSelectionAlert(self, swclk: Bit, swdio: Bit):
 		# Consume the next bit on the rising edge of the clock
@@ -374,12 +398,13 @@ class Decoder(srd.Decoder):
 			case DecoderState.ack:
 				self.handleAck(swclk, swdio)
 			case DecoderState.dataTurnaround:
-				self.handleDataTurnaround(swclk, swdio)
+				self.handleDataTurnaround(swclk)
 			case DecoderState.dataRead:
 				self.handleDataRead(swclk, swdio)
-
+			case DecoderState.dataWrite:
+				self.handleDataWrite(swclk, swdio)
 			case DecoderState.parity:
-				self.handleParity()
+				self.handleParity(swclk)
 			case DecoderState.selectionAlert:
 				self.handleSelectionAlert(swclk, swdio)
 			case DecoderState.activation:
