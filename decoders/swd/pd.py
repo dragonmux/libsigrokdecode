@@ -54,6 +54,7 @@ class DecoderState(Enum):
 	dataRead = auto()
 	dataWrite = auto()
 	parity = auto()
+	idleTurnaround = auto()
 	selectionAlert = auto()
 	activation = auto()
 
@@ -180,12 +181,12 @@ class Decoder(srd.Decoder):
 				self.bits = 0
 			# WAIT Ack
 			case 2:
-				# No further cycles to go, just idle time.. back to the idle state we go!
-				self.state = DecoderState.idle
+				# Nothing more to do, just wait for the final turnaround for bus idle, and idle
+				self.state = DecoderState.idleTurnaround
 			# FAULT Ack
 			case 4:
-				# Similarly to WAIT, we're done.. back to idle
-				self.state = DecoderState.idle
+				# Similarly to WAIT, we're done.. wait for idle
+				self.state = DecoderState.idleTurnaround
 			# NO-RESPONSE Ack
 			case 7:
 				# If the request is to TARGETSEL, we actually now have a write that occurs, selecting
@@ -324,12 +325,18 @@ class Decoder(srd.Decoder):
 	def handleParity(self, swclk: Bit):
 		# Make sure this is a falling clock edge
 		if swclk == 0:
-			# We now have the parity bit, check what state the parity result is, annotate, and idle
+			# We now have the parity bit, check what state the parity result is, annotate,
+			# and wait for the last turnaround
 			parity = 'OK' if self.computedParity == self.actualParity else 'ERROR'
 			self.annotateBits(
 				self.startSample, self.samplenum,
 				[A.PARITY, [f'PARITY {parity}', parity, parity[0]]]
 			)
+			self.state = DecoderState.idleTurnaround
+
+	def handleIdleTurnaround(self, swclk: Bit):
+		# Once we see the falling edge, we can relax and go to idle
+		if swclk == 0:
 			self.state = DecoderState.idle
 			self.startSample = self.samplenum
 
@@ -405,6 +412,8 @@ class Decoder(srd.Decoder):
 				self.handleDataWrite(swclk, swdio)
 			case DecoderState.parity:
 				self.handleParity(swclk)
+			case DecoderState.idleTurnaround:
+				self.handleIdleTurnaround(swclk)
 			case DecoderState.selectionAlert:
 				self.handleSelectionAlert(swclk, swdio)
 			case DecoderState.activation:
