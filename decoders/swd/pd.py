@@ -139,7 +139,7 @@ class Decoder(srd.Decoder):
 	def annotateBit(self, bit: int, data: list[int | list[str]]):
 		self.annotateBits(bit, bit, data)
 
-	def handle_request(self):
+	def handleRequest(self):
 		# Was this the start of one of the special sequences?
 		if self.request == 0xc9:
 			self.state = DecoderState.selectionAlert
@@ -169,7 +169,7 @@ class Decoder(srd.Decoder):
 			self.bits = 1
 			self.state = Decoder.reset
 
-	def handle_swclk_edge(self, swclk: Bit, swdio: Bit):
+	def handleClkEdge(self, swclk: Bit, swdio: Bit):
 		match self.state:
 			case DecoderState.unknown:
 				self.handle_unknown(swclk, swdio)
@@ -206,7 +206,7 @@ class Decoder(srd.Decoder):
 					self.bits += 1
 				elif self.bits == 8:
 					# If we've now consumed a full request's worth of bits, figure out what it is we got
-					self.handle_request()
+					self.handleRequest()
 
 			case DecoderState.ackTurnaround:
 				# If we saw the falling edge of the turnaround clock edge, start pulling in the ACK bits
@@ -300,4 +300,4 @@ class Decoder(srd.Decoder):
 	def decode(self):
 		while True:
 			# Wait for any clock edge.
-			self.handle_swclk_edge(*self.wait({0: 'e'}))
+			self.handleClkEdge(*self.wait({0: 'e'}))
