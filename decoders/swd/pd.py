@@ -56,8 +56,10 @@ class DecoderState(Enum):
 	parity = auto()
 	sync = auto()
 	idleTurnaround = auto()
+	deactivation = auto()
 	selectionAlert = auto()
 	activation = auto()
+	dormantState = auto()
 
 # Regexes for matching SWD data out of bitstring ('1' / '0' characters) format
 RE_SWDSWITCH = re.compile(bin(0xE79E)[:1:-1] + '$')
@@ -149,6 +151,11 @@ class Decoder(srd.Decoder):
 		if self.request == 0xc9:
 			self.state = DecoderState.selectionAlert
 			self.request <<= 120
+			self.bits += 1
+			return
+		elif self.request == 0xdd:
+			self.state = DecoderState.deactivation
+			self.request <<= 23
 			self.bits += 1
 			return
 
@@ -347,6 +354,27 @@ class Decoder(srd.Decoder):
 			self.state = DecoderState.idle
 			self.startSample = self.samplenum
 
+	def handleDeactivation(self, swclk: Bit, swdio: Bit):
+		# Consume the next bit on the rising edge of the clock
+		if swclk == 1:
+			# Check we've got a complete sequence
+			if self.bits == 31:
+				# Is it a valid JTAG-to-dormant sequence
+				if self.request == 0x33bbbbba:
+					self.state = DecoderState.dormantState
+					self.request = swdio
+					self.bits = 0
+					self.annotateBits(self.startSample, self.samplenum, [A.ENABLE, ['DORMANT SEQUENCE', 'DORMANT', 'DS']])
+					self.startSample = self.samplenum
+				else:
+					# We got an invalid sequence, mark the error and go to the unknown state
+					self.state = DecoderState.unknown
+					self.annotateBits(self.startSample, self.samplenum, [A.ERROR, [f'INVALID SEQUENCE {self.request:x}', 'INV SEQ', 'IS']])
+			else:
+				self.request >>= 1
+				self.request |= (swdio << 30)
+				self.bits += 1
+
 	def handleSelectionAlert(self, swclk: Bit, swdio: Bit):
 		# Consume the next bit on the rising edge of the clock
 		if swclk == 1:
@@ -397,6 +425,34 @@ class Decoder(srd.Decoder):
 					self.request |= swdio
 					self.request &= 0xff
 
+	def handleDormantState(self, swclk: Bit, swdio: Bit):
+		# Consume the next bit on the rising edge of the clock
+		if swclk == 1:
+			# Consume bits until we've seen 8 highs in a row
+			if self.bits == 0 and self.request != 0xff:
+				self.request <<= 1
+				self.request |= swdio
+				self.request &= 0xff
+			# If we matched reset, start pulling in bits for the selection alert sequence
+			elif self.bits == 0 and self.request == 0xff:
+				self.request = (swdio << 7)
+				self.bits += 1
+				self.annotateBits(self.startSample, self.samplenum, [A.IDLE, ['DORMANT', 'D']])
+				self.startSample = self.samplenum
+			else:
+				self.request >>= 1
+				self.request |= (swdio << 7)
+				self.bits += 1
+		# If we've got a full suite of bits, figure out if it was the first part of selection sequence, or not
+		elif self.bits == 9:
+			# If it is a selection alert start, great!
+			if self.request == 0xc9:
+				self.state = DecoderState.selectionAlert
+				self.request <<= 120
+			# Otherwise, reset self.bits and go back around the loop
+			else:
+				self.bits = 0
+
 	def handleClkEdge(self, swclk: Bit, swdio: Bit):
 		match self.state:
 			case DecoderState.unknown:
@@ -423,10 +479,14 @@ class Decoder(srd.Decoder):
 				self.handleSync(swclk)
 			case DecoderState.idleTurnaround:
 				self.handleIdleTurnaround(swclk)
+			case DecoderState.deactivation:
+				self.handleDeactivation(swclk, swdio)
 			case DecoderState.selectionAlert:
 				self.handleSelectionAlert(swclk, swdio)
 			case DecoderState.activation:
 				self.handleActivation(swclk, swdio)
+			case DecoderState.dormantState:
+				self.handleDormantState(swclk, swdio)
 
 	def decode(self):
 		while True:
