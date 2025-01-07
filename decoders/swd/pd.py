@@ -61,6 +61,7 @@ class DecoderState(Enum):
 	selectionAlert = auto()
 	activation = auto()
 	dormantState = auto()
+	jtagToSWD = auto()
 
 @unique
 class SelectionState(Enum):
@@ -165,6 +166,11 @@ class Decoder(srd.Decoder):
 		elif self.request == 0xdd:
 			self.state = DecoderState.deactivation
 			self.request <<= 23
+			self.bits += 1
+			return
+		elif self.request == 0xcf and self.selectionState == SelectionState.reset:
+			self.state = DecoderState.jtagToSWD
+			self.request <<= 8
 			self.bits += 1
 			return
 
@@ -487,6 +493,21 @@ class Decoder(srd.Decoder):
 			else:
 				self.bits = 0
 
+	def handleJTAGtoSWD(self, swclk: Bit, swdio: Bit):
+		# Consume the next bit on the rising edge of the clock
+		if swclk == 1:
+			self.request >>= 1
+			self.request |= (swdio << 15)
+			self.bits += 1
+		# If we've got all the bits for the sequence
+		elif self.bits == 16:
+			# Validate we got the right one
+			if self.request == 0xe79e:
+				self.state = DecoderState.reset
+				self.bits = 0
+				self.annotateBits(self.startSample, self.samplenum, [A.ENABLE, ['JTAG to SWD', 'J->S', 'JS']])
+				self.startSample = self.samplenum
+
 	def handleClkEdge(self, swclk: Bit, swdio: Bit):
 		match self.state:
 			case DecoderState.unknown:
@@ -523,6 +544,8 @@ class Decoder(srd.Decoder):
 				self.handleActivation(swclk, swdio)
 			case DecoderState.dormantState:
 				self.handleDormantState(swclk, swdio)
+			case DecoderState.jtagToSWD:
+				self.handleJTAGtoSWD(swclk, swdio)
 
 	def decode(self):
 		while True:
