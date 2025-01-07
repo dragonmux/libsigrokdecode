@@ -61,6 +61,13 @@ class DecoderState(Enum):
 	activation = auto()
 	dormantState = auto()
 
+@unique
+class SelectionState(Enum):
+	unknown = auto()
+	reset = auto()
+	selecting = auto()
+	made = auto()
+
 # Regexes for matching SWD data out of bitstring ('1' / '0' characters) format
 RE_SWDSWITCH = re.compile(bin(0xE79E)[:1:-1] + '$')
 RE_SWDREQ = re.compile(r'1(?P<apdp>.)(?P<rw>.)(?P<addr>..)(?P<parity>.)01$')
@@ -132,6 +139,7 @@ class Decoder(srd.Decoder):
 		self.computedParity = 0
 		self.actualParity = 0
 		self.bits = 0
+		self.selectionState = SelectionState.unknown
 
 	def start(self):
 		self.reset()
@@ -167,6 +175,12 @@ class Decoder(srd.Decoder):
 		# Figure out if this is an AP or a DP access
 		target = 'DP' if (self.request & (1 << 1)) == 0 else 'AP'
 
+		if self.selectionState == SelectionState.reset:
+			if self.request == 0x99:
+				self.selectionState = SelectionState.selecting
+			else:
+				self.selectionState = SelectionState.unknown
+
 		# Determine if this is a read or a write
 		if (self.request & (1 << 2)) != 0:
 			self.annotateBits(self.startSample, self.samplenum, [A.READ, [f'{target} READ', f'{target} RD', f'{target[0]}R']])
@@ -199,8 +213,11 @@ class Decoder(srd.Decoder):
 			case 7:
 				# If the request is to TARGETSEL, we actually now have a write that occurs, selecting
 				# a target on the bus. This must be after a fresh line reset.
-				# XXX: Handle this properly.. this needs further work
-				self.state = DecoderState.idle
+				if self.selectionState == SelectionState.selecting:
+					self.state = DecoderState.dataTurnaround
+					self.bits = 0
+				else:
+					self.state = DecoderState.idle
 			# Anything else is a protocol error
 			case _:
 				self.state = DecoderState.unknown
@@ -230,6 +247,7 @@ class Decoder(srd.Decoder):
 				# Check if we've got enough bits to consider this line reset
 				if self.bits >= 50:
 					self.state = DecoderState.idle
+					self.selectionState = SelectionState.reset
 					self.annotateBits(self.startSample, self.samplenum, [A.RESET, ['LINE RESET', 'LN RST', 'LR']])
 					self.startSample = self.samplenum
 				# If we do not, then we're now back in an unknown state
@@ -329,6 +347,8 @@ class Decoder(srd.Decoder):
 			if self.bits == 32:
 				self.annotateBits(self.startSample, self.samplenum, [A.DATA, [f'{self.data:08x}']])
 				self.startSample = self.samplenum
+				if self.selectionState == SelectionState.selecting:
+					self.selectionState = SelectionState.made
 
 	def handleParity(self, swclk: Bit):
 		# Make sure this is a falling clock edge
