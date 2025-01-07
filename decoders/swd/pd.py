@@ -56,6 +56,7 @@ class DecoderState(Enum):
 	parity = auto()
 	sync = auto()
 	idleTurnaround = auto()
+	waitIdle = auto()
 	deactivation = auto()
 	selectionAlert = auto()
 	activation = auto()
@@ -215,9 +216,9 @@ class Decoder(srd.Decoder):
 				# a target on the bus. This must be after a fresh line reset.
 				if self.selectionState == SelectionState.selecting:
 					self.state = DecoderState.dataTurnaround
-					self.bits = 0
 				else:
-					self.state = DecoderState.idle
+					self.state = DecoderState.waitIdle
+				self.bits = 0
 			# Anything else is a protocol error
 			case _:
 				self.state = DecoderState.unknown
@@ -374,6 +375,19 @@ class Decoder(srd.Decoder):
 			self.state = DecoderState.idle
 			self.startSample = self.samplenum
 
+	def handleWaitIdle(self, swclk: Bit, swdio: Bit):
+		# Wait until we see SWDIO go back low, indicating the debugger idled the bus at last
+		if swclk == 1:
+			if swdio == 0:
+				self.state = DecoderState.idle
+				self.startSample = self.samplenum
+			else:
+				self.bits += 1
+		# If we got more than 34 bits high, the debugger's blown past the 33 bits for the request and the
+		# idle turnaround, so we're now in reset
+		elif self.bits > 34:
+			self.state = DecoderState.reset
+
 	def handleDeactivation(self, swclk: Bit, swdio: Bit):
 		# Consume the next bit on the rising edge of the clock
 		if swclk == 1:
@@ -499,6 +513,8 @@ class Decoder(srd.Decoder):
 				self.handleSync(swclk)
 			case DecoderState.idleTurnaround:
 				self.handleIdleTurnaround(swclk)
+			case DecoderState.waitIdle:
+				self.handleWaitIdle(swclk, swdio)
 			case DecoderState.deactivation:
 				self.handleDeactivation(swclk, swdio)
 			case DecoderState.selectionAlert:
