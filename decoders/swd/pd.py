@@ -73,15 +73,16 @@ class Annotations:
 		ADIV5_ACK_OK,
 		ADIV5_ACK_WAIT,
 		ADIV5_ACK_FAULT,
+		ADIV5_ACK_NO_RESPONSE,
 		ADIV5_READ,
 		ADIV5_WRITE,
 		ADIV5_REGISTER,
 		ADIV5_DATA,
-	) = range(17)
+	) = range(18)
 A = Annotations
 
 ADIv5Op = Literal['DP_READ', 'DP_WRITE', 'AP_READ', 'AP_WRITE', 'LINE_RESET']
-ADIv5Ack = Literal['OK', 'WAIT', 'FAULT']
+ADIv5Ack = Literal['OK', 'WAIT', 'FAULT', 'NO-RESPONSE']
 
 @unique
 class DecoderState(Enum):
@@ -150,6 +151,7 @@ class Decoder(srd.Decoder):
 		('adiv5-ack-ok', 'ACK (OK)'),
 		('adiv5-ack-wait', 'ACK (WAIT)'),
 		('adiv5-ack-fault', 'ACK (FAULT)'),
+		('adiv5-ack-no-response', 'ACK (NO-RESPONSE)'),
 		# ADIv5 transaction annotations
 		('adiv5-read', 'Read'),
 		('adiv5-write', 'Write'),
@@ -159,9 +161,22 @@ class Decoder(srd.Decoder):
 	annotation_rows = (
 		('states', 'States', (A.IDLE, A.RESET, A.ENABLE, A.READ, A.WRITE, A.ACK, A.DATA, A.PARITY, A.ERROR)),
 		('commands', 'Commands', (A.SWD_COMMAND,)),
-		('transactions', 'Transaction',
-			(A.ADIV5_ACK_OK, A.ADIV5_ACK_WAIT, A.ADIV5_ACK_FAULT, A.ADIV5_READ, A.ADIV5_WRITE, A.ADIV5_DATA)),
+		(
+			'transactions', 'Transaction',
+			(
+				A.ADIV5_ACK_OK,
+				A.ADIV5_ACK_WAIT,
+				A.ADIV5_ACK_FAULT,
+				A.ADIV5_ACK_NO_RESPONSE,
+				A.ADIV5_READ,
+				A.ADIV5_WRITE,
+				A.ADIV5_REGISTER,
+				A.ADIV5_DATA
+			)
+		),
 	)
+
+	samplenum: int
 
 	def __init__(self):
 		from .adiv5 import SWDDevices
