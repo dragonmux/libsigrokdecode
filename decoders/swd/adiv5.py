@@ -255,6 +255,8 @@ class ADIv5DP:
 
 		# If it's a read for register 0, regardless of bank, it's DPIDR
 		if rnw == ADIv5RnW.read and reg == 0:
+			# Extract the DP version real quick and stuff it in dpVersion
+			self.dpVersion = (transaction.data >> 12) & 0xf
 			return 'DPIDR'
 		# If it's a write for register 0, regardless of bank, it's ABORT
 		if rnw == ADIv5RnW.write and reg == 0:
