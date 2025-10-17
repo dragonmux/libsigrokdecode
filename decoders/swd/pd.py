@@ -255,7 +255,6 @@ class Decoder(srd.Decoder):
 		else:
 			self.annotateBits(self.startSample, self.samplenum, [A.WRITE, [f'{target} WRITE', f'{target} WR', f'{target[0]}W']])
 		self.state = DecoderState.ackTurnaround
-		self.devices.beginTransaction(self.startSample)
 
 	def processAck(self):
 		match self.ack:
@@ -451,7 +450,7 @@ class Decoder(srd.Decoder):
 			# Add this sample position [begin, end) to the list
 			self.samplePositions.append((self.samplePosition, self.samplenum))
 			# Hand the packet up to the logical decoder
-			self.devices.endTransaction(self.samplenum, self.request, self.ack, self.data,
+			self.devices.transaction(self.request, self.ack, self.data,
 				self.computedParity == self.actualParity)
 
 	def handleSync(self, swclk: Bit):
