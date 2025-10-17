@@ -69,12 +69,15 @@ class Annotations:
 		DATA,
 		PARITY,
 		ERROR,
+		SWD_COMMAND,
 		ADIV5_ACK_OK,
 		ADIV5_ACK_WAIT,
 		ADIV5_ACK_FAULT,
+		ADIV5_READ,
+		ADIV5_WRITE,
 		ADIV5_REGISTER,
 		ADIV5_DATA,
-	) = range(14)
+	) = range(17)
 A = Annotations
 
 ADIv5Op = Literal['DP_READ', 'DP_WRITE', 'AP_READ', 'AP_WRITE', 'LINE_RESET']
@@ -141,22 +144,28 @@ class Decoder(srd.Decoder):
 		('data', 'Data'),
 		('parity', 'Parity'),
 		('error', 'Error'),
+		# Command stream annotations
+		('command', 'Command'),
 		# ADIv5 acknowledgement annotations
 		('adiv5-ack-ok', 'ACK (OK)'),
 		('adiv5-ack-wait', 'ACK (WAIT)'),
 		('adiv5-ack-fault', 'ACK (FAULT)'),
 		# ADIv5 transaction annotations
+		('adiv5-read', 'Read'),
+		('adiv5-write', 'Write'),
 		('adiv5-register', 'Register'),
 		('adiv5-data', 'Data'),
 	)
 	annotation_rows = (
 		('states', 'States', (A.IDLE, A.RESET, A.ENABLE, A.READ, A.WRITE, A.ACK, A.DATA, A.PARITY, A.ERROR)),
+		('commands', 'Commands', (A.SWD_COMMAND,)),
 		('transactions', 'Transaction',
-			(A.ADIV5_ACK_OK, A.ADIV5_ACK_WAIT, A.ADIV5_ACK_FAULT, A.ADIV5_REGISTER, A.ADIV5_DATA)),
+			(A.ADIV5_ACK_OK, A.ADIV5_ACK_WAIT, A.ADIV5_ACK_FAULT, A.ADIV5_READ, A.ADIV5_WRITE, A.ADIV5_DATA)),
 	)
 
 	def __init__(self):
-		pass
+		from .adiv5 import SWDDevices
+		self.devices = SWDDevices(decoder = self)
 
 	def reset(self):
 		# initial SWD data/clock state (presume the bus is idle)
@@ -169,6 +178,8 @@ class Decoder(srd.Decoder):
 		self.actualParity = 0
 		self.bits = 0
 		self.selectionState = SelectionState.unknown
+		self.selectedDP = 0
+		self.devices.reset()
 
 	def start(self):
 		self.reset()
@@ -221,6 +232,7 @@ class Decoder(srd.Decoder):
 		else:
 			self.annotateBits(self.startSample, self.samplenum, [A.WRITE, [f'{target} WRITE', f'{target} WR', f'{target[0]}W']])
 		self.state = DecoderState.ackTurnaround
+		self.devices.beginTransaction(self.startSample)
 
 	def processAck(self):
 		match self.ack:
@@ -395,6 +407,9 @@ class Decoder(srd.Decoder):
 				[A.PARITY, [f'PARITY {parity}', parity, parity[0]]]
 			)
 			self.state = DecoderState.idleTurnaround
+			# Hand the packet up to the logical decoder
+			self.devices.endTransaction(self.samplenum, self.request, self.ack, self.data,
+				self.computedParity == self.actualParity)
 
 	def handleSync(self, swclk: Bit):
 		# If we just saw a falling edge, we're finally properly done with the ACK bits and can now do the
