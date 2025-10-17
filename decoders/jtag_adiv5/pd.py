@@ -29,10 +29,10 @@ Packet:
 (<op>, <dp>, <addr>, <reg>, <ack>, <data>)
 
 <op>:
- - 'DP_READ'
- - 'DP_WRITE'
- - 'AP_READ'
- - 'AP_WRITE'
+	- 'DP_READ'
+	- 'DP_WRITE'
+	- 'AP_READ'
+	- 'AP_WRITE'
 
 <dp>:
 integer index of the DP to which the operation was requested
@@ -44,9 +44,9 @@ integer index of the DP to which the operation was requested
 The decoded register name for the operation
 
 <ack>
- - 'OK'
- - 'WAIT'
- - 'FAULT'
+	- 'OK'
+	- 'WAIT'
+	- 'FAULT'
 
 <data>
 32-bit data value associated with the operation
