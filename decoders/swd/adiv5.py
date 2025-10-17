@@ -339,7 +339,8 @@ class SWDDevices:
 		# Identify if this is a TARGETSEL sequence
 		if (self.dpVersion >= 2 and transaction.ack == ADIv5Ack.noResponse and
 			transaction.rnw == ADIv5RnW.write and transaction.addr == 12):
-			pass
+			# Extract which DP is being selected from the request
+			self.selectedDP = (transaction.data >> 28) & 0xf
 		# If this is a DP IDR read instead, grab the version and stuff it in dpVersion
 		if (transaction.ack == ADIv5Ack.ok and transaction.rnw == ADIv5RnW.read and
 			transaction.addr == 0):
