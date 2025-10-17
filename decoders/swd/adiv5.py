@@ -33,6 +33,10 @@ class ADIv5RnW(IntEnum):
 	write = 0
 	read = 1
 
+	@property
+	def name(self) -> Literal['READ', 'WRITE']:
+		return super().name.upper()
+
 class ADIv5Ack(IntEnum):
 	invalid = 0
 	ok = 1
@@ -218,7 +222,7 @@ class ADIv5DP:
 		# Default the DP to being v1 till we see the DP IDR read
 		self.dpVersion = 1
 
-	def decodeTransaction(self, transaction: ADIv5Transaction):
+	def decodeTransaction(self, dpIndex: int, transaction: ADIv5Transaction):
 		# Decode and annotate what register is being accessed
 		match transaction.target:
 			case ADIv5Target.dp:
@@ -228,6 +232,21 @@ class ADIv5DP:
 
 		# Annotate the ACK state for this access
 		self.decoder.annotateSampleBits(8, 10, [transaction.ack.annotationID, [transaction.ack.name]])
+
+		# Annotate the data phase of this access
+		match transaction.rnw:
+			case ADIv5RnW.read:
+				self.decoder.annotateSampleBits(11, 43,
+					[A.ADIV5_DATA, [f'Read: {transaction.data:08x}', 'Read', 'R']])
+			case ADIv5RnW.write:
+				self.decoder.annotateSampleBits(11, 43,
+					[A.ADIV5_DATA, [f'Write: {transaction.data:08x}', 'Write', 'W']])
+
+		# Emit the transaction into the next decoder up the stack now we know what's going on here
+		self.decoder.emit(
+			f'{transaction.target.name}_{transaction.rnw.name}', dpIndex, *transaction.register,
+			transaction.ack.name, transaction.data
+		)
 
 	def decodeDPReg(self, transaction: ADIv5Transaction):
 		rnw = transaction.rnw
@@ -286,7 +305,17 @@ class ADIv5DP:
 		transaction.register = ((self.select.dpBank << 4) | transaction.addr, register)
 
 	def decodeAPAccess(self, transaction: ADIv5Transaction):
-		pass
+		# Get the AP associated with this transaction
+		ap = self.ap.get(self.select.apsel)
+		if ap is None:
+			ap = self.ap[self.select.apsel] = ADIv5AP(self.select.apsel)
+		assert ap is not None
+		# Now grab the register name for this AP
+		address = (self.select.apBank << 4) | transaction.addr
+		register = ap.regDecoder(transaction.rnw, address)
+		self.decoder.annotateSampleBits(0, 7, [A.ADIV5_REGISTER, [register]])
+		# Store the decoded register for use in further decoding
+		transaction.register = (address, register)
 
 class SWDDevices:
 	def __init__(self, decoder: Decoder):
@@ -326,4 +355,4 @@ class SWDDevices:
 		self.decoder.annotateSampleBits(0, 44, [A.SWD_COMMAND, [f'DP{dpIndex} {target} {accessType}']])
 
 		# Process and decode the transaction
-		self.dps[dpIndex].decodeTransaction(transaction)
+		self.dps[dpIndex].decodeTransaction(dpIndex, transaction)

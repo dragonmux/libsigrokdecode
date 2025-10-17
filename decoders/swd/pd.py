@@ -199,6 +199,10 @@ class Decoder(srd.Decoder):
 		if self.options['strict_start'] == 'no':
 			self.state = DecoderState.idle # No need to wait for a LINE RESET.
 
+	def emit(self, op: ADIv5Op, dp: int, regAddr: int, regName: str, ack: ADIv5Ack, data: int):
+		self.put(self.samplePositions[0][0], self.samplePositions[-1][1], self.outputPython,
+		   (op, dp, regAddr, regName, ack, data))
+
 	def annotateBits(self, begin: int, end: int, data: list[int | list[str]]):
 		self.put(begin, end, self.outputAnnotation, data)
 
