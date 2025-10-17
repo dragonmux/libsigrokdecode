@@ -219,18 +219,15 @@ class ADIv5DP:
 		self.dpVersion = 1
 
 	def decodeTransaction(self, transaction: ADIv5Transaction):
-		# Annotate the I/O direction
-		match transaction.rnw:
-			case ADIv5RnW.read:
-				self.decoder.annotateSampleBit(2, [A.ADIV5_READ, ['Read', 'RD', 'R']])
-			case ADIv5RnW.write:
-				self.decoder.annotateSampleBit(2, [A.ADIV5_WRITE, ['Write', 'WR', 'W']])
-
+		# Decode and annotate what register is being accessed
 		match transaction.target:
 			case ADIv5Target.dp:
 				self.decodeDPAccess(transaction)
 			case ADIv5Target.ap:
 				self.decodeAPAccess(transaction)
+
+		# Annotate the ACK state for this access
+		self.decoder.annotateSampleBits(8, 10, [transaction.ack.annotationID, [transaction.ack.name]])
 
 	def decodeDPReg(self, transaction: ADIv5Transaction):
 		rnw = transaction.rnw
@@ -281,7 +278,12 @@ class ADIv5DP:
 	def decodeDPAccess(self, transaction: ADIv5Transaction):
 		# Decode the register being requested
 		register = self.decodeDPReg(transaction)
-		self.decoder.annotateSampleBits(3, 4, [A.ADIV5_REGISTER, [register]])
+		self.decoder.annotateSampleBits(0, 7, [A.ADIV5_REGISTER, [register]])
+		# If it's a write to the select register, also pass that to our internal notion of its state
+		if register == 'SELECT' and transaction.rnw == ADIv5RnW.write:
+			self.select.changeValue(transaction.data)
+		# Store the decoded register for use in further decoding
+		transaction.register = ((self.select.dpBank << 4) | transaction.addr, register)
 
 	def decodeAPAccess(self, transaction: ADIv5Transaction):
 		pass
