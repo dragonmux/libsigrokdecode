@@ -19,7 +19,6 @@
 #
 
 import sigrokdecode as srd
-import re
 from enum import Enum, unique, auto
 from typing import Literal
 
@@ -27,20 +26,59 @@ from typing import Literal
 OUTPUT_PYTHON format:
 
 Packet:
-[<ptype>, <pdata>]
+(<op>, <dp>, <addr>, <reg>, <ack>, <data>)
 
-<ptype>:
- - 'AP_READ' (AP read)
- - 'DP_READ' (DP read)
- - 'AP_WRITE' (AP write)
- - 'DP_WRITE' (DP write)
- - 'LINE_RESET' (line reset sequence)
+<op>:
+	- 'DP_READ'
+	- 'DP_WRITE'
+	- 'AP_READ'
+	- 'AP_WRITE'
+	- 'LINE_RESET' (line reset sequence)
 
-<pdata>:
-  - tuple of address, ack state, data for the given sequence
+<dp>:
+integer index of the DP to which the operation was requested
+
+<addr>:
+8-bit address of the operation
+
+<reg>:
+The decoded register name for the operation
+
+<ack>
+	- 'OK'
+	- 'WAIT'
+	- 'FAULT'
+
+<data>
+32-bit data value associated with the operation
 '''
 
+__all__ = ['Decoder']
+
 Bit = Literal[0, 1]
+
+class Annotations:
+	'''Annotation and binary output classes.'''
+	(
+		IDLE,
+		RESET,
+		ENABLE,
+		READ,
+		WRITE,
+		ACK,
+		DATA,
+		PARITY,
+		ERROR,
+		ADIV5_ACK_OK,
+		ADIV5_ACK_WAIT,
+		ADIV5_ACK_FAULT,
+		ADIV5_REGISTER,
+		ADIV5_DATA,
+	) = range(14)
+A = Annotations
+
+ADIv5Op = Literal['DP_READ', 'DP_WRITE', 'AP_READ', 'AP_WRITE', 'LINE_RESET']
+ADIv5Ack = Literal['OK', 'WAIT', 'FAULT']
 
 @unique
 class DecoderState(Enum):
@@ -70,30 +108,6 @@ class SelectionState(Enum):
 	selecting = auto()
 	made = auto()
 
-# Regexes for matching SWD data out of bitstring ('1' / '0' characters) format
-RE_SWDSWITCH = re.compile(bin(0xE79E)[:1:-1] + '$')
-RE_SWDREQ = re.compile(r'1(?P<apdp>.)(?P<rw>.)(?P<addr>..)(?P<parity>.)01$')
-RE_IDLE = re.compile('0' * 50 + '$')
-
-# Sample edges
-RISING = 1
-FALLING = 0
-
-class Annotations:
-	'''Annotation and binary output classes.'''
-	(
-		IDLE,
-		RESET,
-		ENABLE,
-		READ,
-		WRITE,
-		ACK,
-		DATA,
-		PARITY,
-		ERROR,
-	) = range(9)
-A = Annotations
-
 class Decoder(srd.Decoder):
 	api_version = 3
 	id = 'swd'
@@ -114,18 +128,31 @@ class Decoder(srd.Decoder):
 			'desc': 'Wait for a line reset before starting to decode',
 			'default': 'no',
 			'values': ('yes', 'no')
-		 },
+		},
 	)
 	annotations = (
-		('idle', 'IDLE'),
-		('reset', 'RESET'),
-		('enable', 'ENABLE'),
-		('read', 'READ'),
-		('write', 'WRITE'),
-		('ack', 'ACK'),
-		('data', 'DATA'),
-		('parity', 'PARITY'),
-		('error', 'ERROR'),
+		# SWD state annotations
+		('idle', 'Idle'),
+		('reset', 'Reset'),
+		('enable', 'Enable'),
+		('read', 'Read'),
+		('write', 'Write'),
+		('ack', 'Acknowledgement'),
+		('data', 'Data'),
+		('parity', 'Parity'),
+		('error', 'Error'),
+		# ADIv5 acknowledgement annotations
+		('adiv5-ack-ok', 'ACK (OK)'),
+		('adiv5-ack-wait', 'ACK (WAIT)'),
+		('adiv5-ack-fault', 'ACK (FAULT)'),
+		# ADIv5 transaction annotations
+		('adiv5-register', 'Register'),
+		('adiv5-data', 'Data'),
+	)
+	annotation_rows = (
+		('states', 'States', (A.IDLE, A.RESET, A.ENABLE, A.READ, A.WRITE, A.ACK, A.DATA, A.PARITY, A.ERROR)),
+		('transactions', 'Transaction',
+			(A.ADIV5_ACK_OK, A.ADIV5_ACK_WAIT, A.ADIV5_ACK_FAULT, A.ADIV5_REGISTER, A.ADIV5_DATA)),
 	)
 
 	def __init__(self):
@@ -409,7 +436,8 @@ class Decoder(srd.Decoder):
 				else:
 					# We got an invalid sequence, mark the error and go to the unknown state
 					self.state = DecoderState.unknown
-					self.annotateBits(self.startSample, self.samplenum, [A.ERROR, [f'INVALID SEQUENCE {self.request:x}', 'INV SEQ', 'IS']])
+					self.annotateBits(self.startSample, self.samplenum,
+						[A.ERROR, [f'INVALID SEQUENCE {self.request:x}', 'INV SEQ', 'IS']])
 			else:
 				self.request >>= 1
 				self.request |= (swdio << 30)
@@ -431,7 +459,8 @@ class Decoder(srd.Decoder):
 				else:
 					# We got an invalid sequence, mark the error and go to the unknown state
 					self.state = DecoderState.unknown
-					self.annotateBits(self.startSample, self.samplenum, [A.ERROR, [f'INVALID SEQUENCE {self.request:x}', 'INV SEQ', 'IS']])
+					self.annotateBits(self.startSample, self.samplenum,
+						[A.ERROR, [f'INVALID SEQUENCE {self.request:x}', 'INV SEQ', 'IS']])
 			else:
 				self.request >>= 1
 				self.request |= (swdio << 127)
