@@ -269,7 +269,7 @@ class Decoder(srd.Decoder):
 	longname = 'ARM Debug Interface v5'
 	desc = 'ARM ADIv5 debug protocol.'
 	license = 'gplv2+'
-	inputs = ['adiv5']
+	inputs = ['adi']
 	outputs: list[str] = []
 	tags = ['Debug/trace']
 	annotations = (
