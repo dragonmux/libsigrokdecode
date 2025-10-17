@@ -42,16 +42,16 @@ class ADIv5Ack(IntEnum):
 
 	@staticmethod
 	def fromValue(ack):
-		# SWD-DPs respond with 4 for OK
-		if ack == 4:
+		# SWD-DPs respond with 0b100 for OK
+		if ack == 1:
 			return ADIv5Ack.ok
-		# 2 for WAIT
+		# 0b010 for WAIT
 		elif ack == 2:
 			return ADIv5Ack.wait
-		# 1 for FAULT
-		elif ack == 1:
+		# 0b001 for FAULT
+		elif ack == 4:
 			return ADIv5Ack.fault
-		# 7 for NO-RESPONSE
+		# 0b111 for NO-RESPONSE
 		elif ack == 7:
 			return ADIv5Ack.noResponse
 		# And everything else is invalid
