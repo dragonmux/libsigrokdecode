@@ -171,6 +171,8 @@ class Decoder(srd.Decoder):
 		# initial SWD data/clock state (presume the bus is idle)
 		self.state = DecoderState.unknown
 		self.startSample = 0
+		self.samplePosition = 0
+		self.samplePositions = list[tuple[int, int]]()
 		self.request = 0
 		self.ack = 0
 		self.data = 0
@@ -193,6 +195,12 @@ class Decoder(srd.Decoder):
 
 	def annotateBit(self, bit: int, data: list[int | list[str]]):
 		self.annotateBits(bit, bit, data)
+
+	def annotateSampleBits(self, begin: int, end: int, data: list[int | list[str]]):
+		self.annotateBits(self.samplePositions[begin][0], self.samplePositions[end][1], data)
+
+	def annotateSampleBit(self, bit: int, data: list[int | list[str]]):
+		self.annotateSampleBits(bit, bit, data)
 
 	def processRequest(self):
 		# Was this the start of one of the special sequences?
@@ -283,6 +291,8 @@ class Decoder(srd.Decoder):
 			self.bits = 1
 			self.annotateBits(self.startSample, self.samplenum, [A.IDLE, ['IDLE', 'I']])
 			self.startSample = self.samplenum
+			self.samplePositions.clear()
+			self.samplePosition = self.samplenum
 
 	def handleReset(self, swclk: Bit, swdio: Bit):
 		# line reset only cares about the line being kept high on rising edges
@@ -306,7 +316,12 @@ class Decoder(srd.Decoder):
 			self.request >>= 1
 			self.request |= (swdio << 7)
 			self.bits += 1
+			# Add this sample position [begin, end) to the list
+			self.samplePositions.append((self.samplePosition, self.samplenum))
+			self.samplePosition = self.samplenum
 		elif self.bits == 8:
+			# Add this sample position [begin, end) to the list
+			self.samplePositions.append((self.samplePosition, self.samplenum))
 			# If we've now consumed a full request's worth of bits, figure out what it is we got
 			self.processRequest()
 
@@ -317,6 +332,7 @@ class Decoder(srd.Decoder):
 			self.ack = (swdio << 2)
 			self.state = DecoderState.ack
 			self.startSample = self.samplenum
+			self.samplePosition = self.samplenum
 
 	def handleAck(self, swclk: Bit, swdio: Bit):
 		# Sample the ACK bits on the falling edges
@@ -324,7 +340,11 @@ class Decoder(srd.Decoder):
 			self.ack >>= 1
 			self.ack |= (swdio << 2)
 			self.bits += 1
+			# Add this sample position [begin, end) to the list
+			self.samplePositions.append((self.samplePosition, self.samplenum))
 		elif self.bits == 3:
+			# Add this sample position [begin, end) to the list
+			self.samplePositions.append((self.samplePosition, self.samplenum))
 			# Figure out what kind of ACK this was and annotate it
 			self.annotateBits(
 				self.startSample, self.samplenum,
@@ -341,6 +361,7 @@ class Decoder(srd.Decoder):
 				]
 			)
 			self.startSample = self.samplenum
+			self.samplePosition = self.samplenum
 			# Now turn the ack into an appropriate state change
 			self.processAck()
 
@@ -353,6 +374,7 @@ class Decoder(srd.Decoder):
 				self.computedParity = 0
 				self.state = DecoderState.dataWrite
 				self.startSample = self.samplenum
+				self.samplePosition = self.samplenum
 			else:
 				self.bits += 1
 
@@ -369,6 +391,8 @@ class Decoder(srd.Decoder):
 				self.actualParity = swdio
 				self.state = DecoderState.parity
 			self.bits += 1
+			# Add this sample position [begin, end) to the list
+			self.samplePositions.append((self.samplePosition, self.samplenum))
 		else:
 			# If we have all the data bits, annotate
 			if self.bits == 32:
@@ -388,6 +412,8 @@ class Decoder(srd.Decoder):
 				self.actualParity = swdio
 				self.state = DecoderState.parity
 			self.bits += 1
+			# Add this sample position [begin, end) to the list
+			self.samplePositions.append((self.samplePosition, self.samplenum))
 		else:
 			# If we have all the data bits, annotate
 			if self.bits == 32:
@@ -407,6 +433,8 @@ class Decoder(srd.Decoder):
 				[A.PARITY, [f'PARITY {parity}', parity, parity[0]]]
 			)
 			self.state = DecoderState.idleTurnaround
+			# Add this sample position [begin, end) to the list
+			self.samplePositions.append((self.samplePosition, self.samplenum))
 			# Hand the packet up to the logical decoder
 			self.devices.endTransaction(self.samplenum, self.request, self.ack, self.data,
 				self.computedParity == self.actualParity)
