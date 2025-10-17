@@ -196,16 +196,17 @@ class ADIv5AP:
 
 	@property
 	def regDecoder(self):
-		if self.kind == ADIv5APKind.jtag:
-			return decodeJTAGAPReg
-		elif self.kind == ADIv5APKind.mem:
-			return decodeMemAPReg
-		elif self.kind == ADIv5APKind.com:
-			# These are actually defined in an entirely seperate guide
-			# and we don't currently support them.
-			return decodeUnknownAPReg
-		elif self.kind == ADIv5APKind.unknown:
-			return decodeUnknownAPReg
+		match self.kind:
+			case ADIv5APKind.jtag:
+				return decodeJTAGAPReg
+			case ADIv5APKind.mem:
+				return decodeMemAPReg
+			case ADIv5APKind.com:
+				# These are actually defined in an entirely seperate guide
+				# and we don't currently support them.
+				return decodeUnknownAPReg
+			case ADIv5APKind.unknown:
+				return decodeUnknownAPReg
 
 	def handleRegRead(self, reg: int, value: int):
 		# If the read is for the IDR, decode the IDR's value and switch our AP kind to the result
@@ -311,7 +312,6 @@ class ADIv5DP:
 		ap = self.ap.get(self.select.apsel)
 		if ap is None:
 			ap = self.ap[self.select.apsel] = ADIv5AP(self.select.apsel)
-		assert ap is not None
 		# Now grab the register name for this AP
 		address = (self.select.apBank << 4) | transaction.addr
 		register = ap.regDecoder(transaction.rnw, address)
