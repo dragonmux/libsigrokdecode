@@ -74,11 +74,9 @@ class Annotations:
 		ADIV5_ACK_WAIT,
 		ADIV5_ACK_FAULT,
 		ADIV5_ACK_NO_RESPONSE,
-		ADIV5_READ,
-		ADIV5_WRITE,
 		ADIV5_REGISTER,
 		ADIV5_DATA,
-	) = range(18)
+	) = range(16)
 A = Annotations
 
 ADIv5Op = Literal['DP_READ', 'DP_WRITE', 'AP_READ', 'AP_WRITE', 'LINE_RESET']
@@ -153,8 +151,6 @@ class Decoder(srd.Decoder):
 		('adiv5-ack-fault', 'ACK (FAULT)'),
 		('adiv5-ack-no-response', 'ACK (NO-RESPONSE)'),
 		# ADIv5 transaction annotations
-		('adiv5-read', 'Read'),
-		('adiv5-write', 'Write'),
 		('adiv5-register', 'Register'),
 		('adiv5-data', 'Data'),
 	)
@@ -168,8 +164,6 @@ class Decoder(srd.Decoder):
 				A.ADIV5_ACK_WAIT,
 				A.ADIV5_ACK_FAULT,
 				A.ADIV5_ACK_NO_RESPONSE,
-				A.ADIV5_READ,
-				A.ADIV5_WRITE,
 				A.ADIV5_REGISTER,
 				A.ADIV5_DATA
 			)
