@@ -191,7 +191,7 @@ class Decoder(srd.Decoder):
 	desc = 'ARM ADIv5 JTAG debug protocol.'
 	license = 'gplv2+'
 	inputs = ['jtag']
-	outputs = ['adiv5']
+	outputs = ['adi']
 	tags = ['Debug/trace']
 	annotations = (
 		# JTAG encapsulation annotations
