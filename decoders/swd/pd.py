@@ -199,9 +199,8 @@ class Decoder(srd.Decoder):
 		if self.options['strict_start'] == 'no':
 			self.state = DecoderState.idle # No need to wait for a LINE RESET.
 
-	def emit(self, op: ADIv5Op, dp: int, regAddr: int, regName: str, ack: ADIv5Ack, data: int):
-		self.put(self.samplePositions[0][0], self.samplePositions[-1][1], self.outputPython,
-		   (op, dp, regAddr, regName, ack, data))
+	def emit(self, begin: int, end: int, op: ADIv5Op, dp: int, regAddr: int, regName: str, ack: ADIv5Ack, data: int):
+		self.put(begin, end, self.outputPython, (op, dp, regAddr, regName, ack, data))
 
 	def annotateBits(self, begin: int, end: int, data: list[int | list[str]]):
 		self.put(begin, end, self.outputAnnotation, data)
@@ -448,8 +447,8 @@ class Decoder(srd.Decoder):
 			# Add this sample position [begin, end) to the list
 			self.samplePositions.append((self.samplePosition, self.samplenum))
 			# Hand the packet up to the logical decoder
-			self.devices.transaction(self.request, self.ack, self.data,
-				self.computedParity == self.actualParity)
+			self.devices.transaction(self.samplePositions[0][0], self.samplePositions[-1][1],
+				self.request, self.ack, self.data, self.computedParity == self.actualParity)
 
 	def handleSync(self, swclk: Bit):
 		# If we just saw a falling edge, we're finally properly done with the ACK bits and can now do the

@@ -91,14 +91,15 @@ class ADIv5Transaction:
 	'''Holder type for an ADIv5 transaction'''
 	register: tuple[int, str]
 
-	def __init__(self, request: int, ack: int, data: int, parityOk: bool):
-		# TODO: deal with parity errors!
+	def __init__(self, begin: int, end: int, request: int, ack: int, data: int, parityOk: bool):
+		# TODO: deal with parity and ack errors!
 		# Extract the request bits out
 		self.target = ADIv5Target.ap if (request & (1 << 1)) != 0 else ADIv5Target.dp
 		self.rnw = ADIv5RnW.read if (request & (1 << 2)) != 0 else ADIv5RnW.write
 		self.addr = ((request >> 3) & 3) << 2
 		self.ack = ADIv5Ack.fromValue(ack)
 		self.data = data
+		self.position = (begin, end)
 
 class ADIv5DPSelect:
 	'''Internal representation of the state of the DP SELECT register'''
@@ -247,8 +248,9 @@ class ADIv5DP:
 
 		# Emit the transaction into the next decoder up the stack now we know what's going on here
 		self.decoder.emit(
-			f'{transaction.target.name}_{transaction.rnw.name}', dpIndex, *transaction.register,
-			transaction.ack.name, transaction.data
+			transaction.position[0], transaction.position[1],
+			f'{transaction.target.name}_{transaction.rnw.name}', dpIndex, transaction.register[0],
+			transaction.register[1], transaction.ack.name, transaction.data
 		)
 
 	def decodeDPReg(self, transaction: ADIv5Transaction):
@@ -336,9 +338,9 @@ class SWDDevices:
 		self.dps.clear()
 		self.dpVersion = 1
 
-	def transaction(self, request: int, ack: int, data: int, parityOk: bool):
+	def transaction(self, begin: int, end: int, request: int, ack: int, data: int, parityOk: bool):
 		# Turn the request into a transaction
-		transaction = ADIv5Transaction(request, ack, data, parityOk)
+		transaction = ADIv5Transaction(begin, end, request, ack, data, parityOk)
 
 		# Identify if this is a TARGETSEL sequence
 		if (self.dpVersion >= 2 and transaction.ack == ADIv5Ack.noResponse and
