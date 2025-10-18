@@ -217,16 +217,17 @@ class ADIv5AP:
 
 class ADIv5DP:
 	'''Internal representatioon of an ADIv5 DP'''
-	def __init__(self, decoder: Decoder):
+	def __init__(self, decoder: Decoder, dp: int):
 		self.decoder = decoder
 		self.select = ADIv5DPSelect()
+		self.dp = dp
 		self.ap: dict[int, ADIv5AP] = {}
 		# Default the DP to being v1 till we see the DP IDR read
 		self.dpVersion = 1
 		# Tag for whether this is a minmal DP and thus needs transaction merging
 		self.minDP = False
 
-	def decodeTransaction(self, dpIndex: int, transaction: ADIv5Transaction):
+	def decodeTransaction(self, transaction: ADIv5Transaction):
 		# Decode and annotate what register is being accessed
 		match transaction.target:
 			case ADIv5Target.dp:
@@ -249,7 +250,7 @@ class ADIv5DP:
 		# Emit the transaction into the next decoder up the stack now we know what's going on here
 		self.decoder.emit(
 			transaction.position[0], transaction.position[1],
-			f'{transaction.target.name}_{transaction.rnw.name}', dpIndex, transaction.register[0],
+			f'{transaction.target.name}_{transaction.rnw.name}', self.dp, transaction.register[0],
 			transaction.register[1], transaction.ack.name, transaction.data
 		)
 
@@ -356,7 +357,7 @@ class SWDDevices:
 		dpIndex = self.selectedDP
 		# If this DP hasn't yet been seen before (say, because it only just got selected), make a new one for it
 		if dpIndex not in self.dps:
-			self.dps[dpIndex] = ADIv5DP(self.decoder)
+			self.dps[dpIndex] = ADIv5DP(self.decoder, dpIndex)
 
 		# Annotate the request as a command
 		target = transaction.target.name
@@ -364,4 +365,4 @@ class SWDDevices:
 		self.decoder.annotateSampleBits(0, 44, [A.SWD_COMMAND, [f'DP{dpIndex} {target} {accessType}']])
 
 		# Process and decode the transaction
-		self.dps[dpIndex].decodeTransaction(dpIndex, transaction)
+		self.dps[dpIndex].decodeTransaction(transaction)
