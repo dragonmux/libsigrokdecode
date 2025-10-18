@@ -107,11 +107,14 @@ class ADIv5APIdentReg:
 class ADIv5AP(metaclass = ABCMeta):
 	'''This serves as a base type for all AP variants'''
 	@staticmethod
-	def fromID(value: int):
+	def fromID(value: int) -> 'ADIv5AP':
 		'''Construct a suitable AP instance from an ID register value'''
 		ident = ADIv5APIdentReg(value)
-		if ident.kind == ADIv5APKind.jtag:
-			return ADIv5JTAGAP(ident)
+		match ident.kind:
+			case ADIv5APKind.jtag:
+				return ADIv5JTAGAP(ident)
+			case ADIv5APKind.mem:
+				return ADIV5MemAP(ident)
 
 	@abstractmethod
 	def __init__(self, ident: ADIv5APIdentReg):
