@@ -226,6 +226,8 @@ class ADIv5DP:
 		self.dpVersion = 1
 		# Tag for whether this is a minmal DP and thus needs transaction merging
 		self.minDP = False
+		# Split transaction tracking
+		self.transaction: ADIv5Transaction | None = None
 
 	def decodeTransaction(self, transaction: ADIv5Transaction):
 		# Decode and annotate what register is being accessed
@@ -247,12 +249,33 @@ class ADIv5DP:
 				self.decoder.annotateSampleBits(11, 43,
 					[A.ADIV5_DATA, [f'Write: {transaction.data:08x}', 'Write', 'W']])
 
-		# Emit the transaction into the next decoder up the stack now we know what's going on here
-		self.decoder.emit(
-			transaction.position[0], transaction.position[1],
-			f'{transaction.target.name}_{transaction.rnw.name}', self.dp, transaction.register[0],
-			transaction.register[1], transaction.ack.name, transaction.data
-		)
+		# Check if this is an AP read access on a min-DP that therefore smeers the transaction over two
+		if transaction.target == ADIv5Target.ap and transaction.rnw == ADIv5RnW.read:
+			# If it is, store this transaction and use it for emission in the next pass through here
+			self.transaction = transaction
+		elif self.transaction is not None:
+			# This is a smeered transaction, emit appropriately and reset storage
+			self.decoder.emit(
+				self.transaction.position[0], transaction.position[1],
+				f'{self.transaction.target.name}_{self.transaction.rnw.name}', self.dp,
+				self.transaction.register[0], self.transaction.register[1],
+				self.transaction.ack.name, transaction.data
+			)
+			# Feed the AP data into the AP transaction decoder
+			self.ap[self.select.apsel].handleRegRead(self.transaction.register[0], transaction.data)
+			# If this was a read of RDBUFF we're done with the smeered transactions
+			if transaction.target == ADIv5Target.dp and transaction.register[1] == 'RDBUFF':
+				self.transaction = None
+			# Otherwise this was another AP access most likely so store and deal with in the next cycle
+			else:
+				self.transaction = transaction
+		else:
+			# Emit the transaction into the next decoder up the stack now we know what's going on here
+			self.decoder.emit(
+				transaction.position[0], transaction.position[1],
+				f'{transaction.target.name}_{transaction.rnw.name}', self.dp, transaction.register[0],
+				transaction.register[1], transaction.ack.name, transaction.data
+			)
 
 	def decodeDPReg(self, transaction: ADIv5Transaction):
 		rnw = transaction.rnw
