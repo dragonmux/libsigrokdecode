@@ -222,6 +222,8 @@ class ADIv5DP:
 		self.ap: dict[int, ADIv5AP] = {}
 		# Default the DP to being v1 till we see the DP IDR read
 		self.dpVersion = 1
+		# Tag for whether this is a minmal DP and thus needs transaction merging
+		self.minDP = False
 
 	def decodeTransaction(self, dpIndex: int, transaction: ADIv5Transaction):
 		# Decode and annotate what register is being accessed
@@ -258,6 +260,8 @@ class ADIv5DP:
 		if rnw == ADIv5RnW.read and reg == 0:
 			# Extract the DP version real quick and stuff it in dpVersion
 			self.dpVersion = (transaction.data >> 12) & 0xf
+			# Likewise the MinDP bit
+			self.minDP = (transaction.data & (1 << 16)) != 0
 			return 'DPIDR'
 		# If it's a write for register 0, regardless of bank, it's ABORT
 		if rnw == ADIv5RnW.write and reg == 0:
