@@ -250,7 +250,8 @@ class ADIv5DP:
 					[A.ADIV5_DATA, [f'Write: {transaction.data:08x}', 'Write', 'W']])
 
 		# Check if this is an AP read access on a min-DP that therefore smeers the transaction over two
-		if transaction.target == ADIv5Target.ap and transaction.rnw == ADIv5RnW.read:
+		if (transaction.target == ADIv5Target.ap and transaction.rnw == ADIv5RnW.read and
+			transaction.register[1] != 'DRW'):
 			# If it is, store this transaction and use it for emission in the next pass through here
 			self.transaction = transaction
 		elif self.transaction is not None:
