@@ -232,27 +232,27 @@ class ADIv5DP:
 	def decodeTransaction(self, transaction: ADIv5Transaction):
 		# If the transaction is for the DP, process the data into current register state
 		if transaction.target == ADIv5Target.dp:
-			reg = transaction.register[1]
-			if reg == 'ABORT':
-				self.abort = transaction.data
-			elif reg == 'CTRL/STAT':
-				self.ctrlstat = transaction.data
-			elif reg == 'SELECT':
-				self.select.changeValue(transaction.data)
-			elif reg == 'RDBUFF':
-				self.rdbuff = transaction.data
-			elif reg == 'DPIDR':
-				self.dpidr = transaction.data
-			elif reg == 'DLCR':
-				self.dlcr = transaction.data
-			elif reg == 'TARGETID':
-				self.targetid = transaction.data
-			elif reg == 'DLPIDR':
-				self.dlpidr = transaction.data
-			elif reg == 'EVENTSTAT':
-				self.eventstat = transaction.data
-			else:
-				raise ValueError(f'Invalid DP register {reg} given')
+			match transaction.register[1]:
+				case 'ABORT':
+					self.abort = transaction.data
+				case 'CTRL/STAT':
+					self.ctrlstat = transaction.data
+				case 'SELECT':
+					self.select.changeValue(transaction.data)
+				case 'RDBUFF':
+					self.rdbuff = transaction.data
+				case 'DPIDR':
+					self.dpidr = transaction.data
+				case 'DLCR':
+					self.dlcr = transaction.data
+				case 'TARGETID':
+					self.targetid = transaction.data
+				case 'DLPIDR':
+					self.dlpidr = transaction.data
+				case 'EVENTSTAT':
+					self.eventstat = transaction.data
+				case reg:
+					raise ValueError(f'Invalid DP register {reg} ({transaction.register[0]}) given')
 		else:
 			# If the DP for this transaction is not yet known, see if this is an AP IDR transaction
 			# and if so, make a new DP instance based on the decoded value
