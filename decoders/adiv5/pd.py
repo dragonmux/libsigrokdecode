@@ -28,8 +28,8 @@ class Annotations:
 	'''Annotation and binary output classes.'''
 	(
 		TRANS_EVEN, TRANS_ODD,
-		READ, WRITE, OK, WAIT, FAULT, NO_RESPONSE
-	) = range(8)
+		READ, WRITE
+	) = range(4)
 A = Annotations
 
 ADIv5Op = Literal['DP_READ', 'DP_WRITE', 'AP_READ', 'AP_WRITE']
@@ -208,7 +208,21 @@ class ADIv5DPCtrlStat:
 	pass
 
 class ADIv5DPID:
-	pass
+	def __init__(self):
+		self.value = 0
+
+	def changeValue(self, dpidr: int):
+		self.value = dpidr
+
+	@property
+	def isMinDP(self):
+		return (self.value & (1 << 16)) != 0
+
+	def __str__(self):
+		vendor = (self.value & 0xf00) | ((self.value & 0xfe) >> 1)
+		version = (self.value >> 12) & 0xf
+		minDP = ' Min-DP' if self.isMinDP else ''
+		return f'{vendor:03x} DPv{version}{minDP}'
 
 class ADIv5DPTargetID:
 	pass
@@ -229,7 +243,7 @@ class ADIv5DP:
 		self.ctrlstat = 0
 		self.select = ADIv5DPSelect()
 		self.rdbuff = 0
-		self.dpidr = 0
+		self.dpidr = ADIv5DPID()
 		self.dlcr = 0
 		self.targetid = 0
 		self.targetsel = 0
@@ -240,6 +254,7 @@ class ADIv5DP:
 	def decodeTransaction(self, position: tuple[int, int, int], transaction: ADIv5Transaction):
 		# If the transaction is for the DP, process the data into current register state
 		if transaction.target == ADIv5Target.dp:
+			value = transaction.data
 			match transaction.register[1]:
 				case 'ABORT':
 					self.abort = transaction.data
@@ -247,10 +262,12 @@ class ADIv5DP:
 					self.ctrlstat = transaction.data
 				case 'SELECT':
 					self.select.changeValue(transaction.data)
+					value = self.select
 				case 'RDBUFF':
 					self.rdbuff = transaction.data
 				case 'DPIDR':
-					self.dpidr = transaction.data
+					self.dpidr.changeValue(transaction.data)
+					value = self.dpidr
 				case 'DLCR':
 					self.dlcr = transaction.data
 				case 'TARGETID':
@@ -264,6 +281,7 @@ class ADIv5DP:
 				case reg:
 					raise ValueError(f'Invalid DP register {reg} ({transaction.register[0]}) given')
 
+			# Annotate the raw transaction
 			targetName = f'DP{transaction.dp}'
 			begin, end, line = position
 			self.decoder.annotate(begin, end,
@@ -275,6 +293,10 @@ class ADIv5DP:
 					]
 				]
 			)
+
+			# Annotate the lifted transaction
+			op = A.READ if transaction.rnw == ADIv5RnW.read else A.WRITE
+			self.decoder.annotate(begin, end, [op, [f'{value}']])
 		else:
 			# If the DP for this transaction is not yet known, see if this is an AP IDR transaction
 			# and if so, make a new DP instance based on the decoded value
@@ -307,12 +329,15 @@ class Decoder(srd.Decoder):
 	outputs: list[str] = []
 	tags = ['Debug/trace']
 	annotations = (
-		('transaction-even', 'Transaction (even)'),
-		('transaction-odd', 'Transaction (odd)'),
+		('transaction-even', 'Transactions (even)'),
+		('transaction-odd', 'Transactions (odd)'),
+		('read', 'Read'),
+		('write', 'Write'),
 	)
 	annotation_rows = (
-		('transaction-even', 'Transaction (even)', (A.TRANS_EVEN,)),
-		('transaction-odd', 'Transaction (odd)', (A.TRANS_ODD,)),
+		('transaction-even', 'Transactions (even)', (A.TRANS_EVEN,)),
+		('transaction-odd', 'Transactions (odd)', (A.TRANS_ODD,)),
+		('operation', 'Operations', (A.READ, A.WRITE)),
 	)
 
 	def __init__(self):
