@@ -249,6 +249,11 @@ class ADIv5DP:
 				self.decoder.annotateSampleBits(11, 43,
 					[A.ADIV5_DATA, [f'Write: {transaction.data:08x}', 'Write', 'W']])
 
+		# If this is a TARGETSEL write, rewrite the ack state for emission
+		if (transaction.target == ADIv5Target.dp and transaction.rnw == ADIv5RnW.write and
+			transaction.register[1] == 'TARGETSEL' and transaction.ack == ADIv5Ack.noResponse):
+			transaction.ack = ADIv5Ack.ok
+
 		# Check if this is an AP read access on a min-DP that therefore smeers the transaction over two
 		if (transaction.target == ADIv5Target.ap and transaction.rnw == ADIv5RnW.read and
 			transaction.register[1] != 'DRW'):
