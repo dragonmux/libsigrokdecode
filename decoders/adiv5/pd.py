@@ -82,6 +82,15 @@ class ADIv5Transaction:
 	def __str__(self):
 		return f'<ADIv5Transaction, DP{self.dp} {self.target} {self.rnw} {self.register[1]}: {self.data}>'
 
+class Register(metaclass = ABCMeta):
+	@abstractmethod
+	def changeValue(self, value: int) -> None:
+		raise NotImplementedError('Register must implement value updates')
+
+	@abstractmethod
+	def __str__(self) -> str:
+		raise NotImplementedError('Register must implement string conversion')
+
 class ADIv5APIdentReg:
 	'''Internal representation of an AP's IDR'''
 	def __init__(self, value: int):
@@ -207,7 +216,7 @@ class ADIV5MemAP(ADIv5AP):
 class ADIv5DPCtrlStat:
 	pass
 
-class ADIv5DPID:
+class ADIv5DPID(Register):
 	def __init__(self):
 		self.value = 0
 
@@ -227,7 +236,7 @@ class ADIv5DPID:
 class ADIv5DPTargetID:
 	pass
 
-class ADIv5DPSelect:
+class ADIv5DPSelect(Register):
 	'''Internal representation of the state of the DP SELECT register (NB, we only care about the AP selected)'''
 	def __init__(self):
 		self.currentAP = 0
@@ -235,6 +244,9 @@ class ADIv5DPSelect:
 	def changeValue(self, select: int):
 		'''Decode a write to the SELECT register to get the new value'''
 		self.currentAP = select >> 24
+
+	def __str__(self) -> str:
+		return f'AP{self.currentAP}'
 
 class ADIv5DP:
 	def __init__(self, decoder: 'Decoder'):
@@ -254,7 +266,7 @@ class ADIv5DP:
 	def decodeTransaction(self, position: tuple[int, int, int], transaction: ADIv5Transaction):
 		# If the transaction is for the DP, process the data into current register state
 		if transaction.target == ADIv5Target.dp:
-			value = transaction.data
+			value: int | Register = transaction.data
 			match transaction.register[1]:
 				case 'ABORT':
 					self.abort = transaction.data
