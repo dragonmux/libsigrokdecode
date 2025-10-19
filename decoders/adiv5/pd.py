@@ -79,6 +79,9 @@ class ADIv5Transaction:
 		else:
 			raise ValueError('Invalid ACK value given')
 
+	def __str__(self):
+		return f'<ADIv5Transaction, DP{self.dp} {self.target} {self.rnw} {self.register[1]}: {self.data}>'
+
 class ADIv5APIdentReg:
 	'''Internal representation of an AP's IDR'''
 	def __init__(self, value: int):
@@ -220,7 +223,8 @@ class ADIv5DPSelect:
 		self.currentAP = select >> 24
 
 class ADIv5DP:
-	def __init__(self):
+	def __init__(self, decoder: 'Decoder'):
+		self.decoder = decoder
 		self.abort = 0
 		self.ctrlstat = 0
 		self.select = ADIv5DPSelect()
@@ -228,11 +232,12 @@ class ADIv5DP:
 		self.dpidr = 0
 		self.dlcr = 0
 		self.targetid = 0
+		self.targetsel = 0
 		self.dlpidr = 0
 		self.eventstat = 0
 		self.ap = dict[int, ADIv5AP]()
 
-	def decodeTransaction(self, transaction: ADIv5Transaction):
+	def decodeTransaction(self, position: tuple[int, int, int], transaction: ADIv5Transaction):
 		# If the transaction is for the DP, process the data into current register state
 		if transaction.target == ADIv5Target.dp:
 			match transaction.register[1]:
@@ -250,20 +255,46 @@ class ADIv5DP:
 					self.dlcr = transaction.data
 				case 'TARGETID':
 					self.targetid = transaction.data
+				case 'TARGETSEL':
+					self.targetsel = transaction.data
 				case 'DLPIDR':
 					self.dlpidr = transaction.data
 				case 'EVENTSTAT':
 					self.eventstat = transaction.data
 				case reg:
 					raise ValueError(f'Invalid DP register {reg} ({transaction.register[0]}) given')
+
+			targetName = f'DP{transaction.dp}'
+			begin, end, line = position
+			self.decoder.annotate(begin, end,
+				[
+					line,
+					[
+						f'{targetName} {transaction.rnw.name} {transaction.register[1]}:'
+						f' {transaction.data:08x}'
+					]
+				]
+			)
 		else:
 			# If the DP for this transaction is not yet known, see if this is an AP IDR transaction
 			# and if so, make a new DP instance based on the decoded value
 			ap = self.ap.get(self.select.currentAP)
 			if ap is None:
-				if transaction.register != 'IDR':
+				if transaction.register[1] != 'IDR':
 					return
 				ap = self.ap[self.select.currentAP] = ADIv5AP.fromID(transaction.data)
+
+			targetName = f'DP{transaction.dp} AP{self.select.currentAP}'
+			begin, end, line = position
+			self.decoder.annotate(begin, end,
+				[
+					line,
+					[
+						f'{targetName} {transaction.rnw.name} {transaction.register[1]}({transaction.register[0]:03x}):'
+						f' {transaction.data:08x}'
+					]
+				]
+			)
 
 class Decoder(srd.Decoder):
 	api_version = 3
@@ -306,18 +337,14 @@ class Decoder(srd.Decoder):
 		# Figure out which transaction line to display it and convert the transaction into an annotation
 		line = A.TRANS_EVEN if (self.transactCount & 1) == 0 else A.TRANS_ODD
 		self.transactCount += 1
-		targetName = f'DP{transaction.dp}'
-		if transaction.target == ADIv5Target.ap:
-			targetName += ' AP'
-		self.annotate(beginSample, endSample,
-			[line, [f'{targetName} {transaction.rnw.name} {transaction.register[0]}: {transaction.data:08x}']])
 
 		# If the transation failed for some reason, handle that and return
 		if transaction.ack != ADIv5Ack.ok:
+			print(f'Discarding transaction {transaction}')
 			return
 
 		# If the DP for this transaction is not yet known, make a new DP instance
 		dp = self.dp.get(transaction.dp)
 		if dp is None:
-			dp = self.dp[transaction.dp] = ADIv5DP()
-		dp.decodeTransaction(transaction)
+			dp = self.dp[transaction.dp] = ADIv5DP(self)
+		dp.decodeTransaction((beginSample, endSample, line), transaction)
