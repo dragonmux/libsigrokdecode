@@ -22,7 +22,7 @@ from abc import ABCMeta, abstractmethod
 from enum import Enum, unique, auto
 from typing import Literal
 
-from .jep106 import JEP106
+from .registers import Register, ADIv5DPSelect, ADIv5DPID
 
 __all__ = ['Decoder']
 
@@ -83,15 +83,6 @@ class ADIv5Transaction:
 
 	def __str__(self):
 		return f'<ADIv5Transaction, DP{self.dp} {self.target} {self.rnw} {self.register[1]}: {self.data}>'
-
-class Register(metaclass = ABCMeta):
-	@abstractmethod
-	def changeValue(self, value: int) -> None:
-		raise NotImplementedError('Register must implement value updates')
-
-	@abstractmethod
-	def __str__(self) -> str:
-		raise NotImplementedError('Register must implement string conversion')
 
 class ADIv5APIdentReg:
 	'''Internal representation of an AP's IDR'''
@@ -214,41 +205,6 @@ class ADIV5MemAP(ADIv5AP):
 				self.base |= (transaction.data << 32)
 		else:
 			super().decodeTransaction(transaction)
-
-class ADIv5DPCtrlStat:
-	pass
-
-class ADIv5DPID(Register):
-	def __init__(self):
-		self.value = 0
-
-	def changeValue(self, dpidr: int):
-		self.value = dpidr
-
-	@property
-	def isMinDP(self):
-		return (self.value & (1 << 16)) != 0
-
-	def __str__(self):
-		vendor = JEP106((self.value & 0xf00) | ((self.value & 0xfe) >> 1))
-		version = (self.value >> 12) & 0xf
-		minDP = ' Min-DP' if self.isMinDP else ''
-		return f'{vendor} DPv{version}{minDP}'
-
-class ADIv5DPTargetID:
-	pass
-
-class ADIv5DPSelect(Register):
-	'''Internal representation of the state of the DP SELECT register (NB, we only care about the AP selected)'''
-	def __init__(self):
-		self.currentAP = 0
-
-	def changeValue(self, select: int):
-		'''Decode a write to the SELECT register to get the new value'''
-		self.currentAP = select >> 24
-
-	def __str__(self) -> str:
-		return f'AP{self.currentAP}'
 
 class ADIv5DP:
 	def __init__(self, decoder: 'Decoder'):

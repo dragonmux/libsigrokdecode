@@ -1,0 +1,66 @@
+##
+## This file is part of the libsigrokdecode project.
+##
+## Copyright (C) 2025 Rachel Mant <git@dragonmux.network>
+##
+## This program is free software; you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation; either version 2 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, see <http://www.gnu.org/licenses/>.
+##
+
+from abc import ABCMeta, abstractmethod
+
+from .jep106 import JEP106
+
+class Register(metaclass = ABCMeta):
+	@abstractmethod
+	def changeValue(self, value: int) -> None:
+		raise NotImplementedError('Register must implement value updates')
+
+	@abstractmethod
+	def __str__(self) -> str:
+		raise NotImplementedError('Register must implement string conversion')
+
+class ADIv5DPCtrlStat:
+	pass
+
+class ADIv5DPID(Register):
+	def __init__(self):
+		self.value = 0
+
+	def changeValue(self, dpidr: int):
+		self.value = dpidr
+
+	@property
+	def isMinDP(self):
+		return (self.value & (1 << 16)) != 0
+
+	def __str__(self):
+		vendor = JEP106((self.value & 0xf00) | ((self.value & 0xfe) >> 1))
+		version = (self.value >> 12) & 0xf
+		minDP = ' Min-DP' if self.isMinDP else ''
+		return f'{vendor} DPv{version}{minDP}'
+
+class ADIv5DPTargetID:
+	pass
+
+class ADIv5DPSelect(Register):
+	'''Internal representation of the state of the DP SELECT register (NB, we only care about the AP selected)'''
+	def __init__(self):
+		self.currentAP = 0
+
+	def changeValue(self, select: int):
+		'''Decode a write to the SELECT register to get the new value'''
+		self.currentAP = select >> 24
+
+	def __str__(self) -> str:
+		return f'AP{self.currentAP}'
