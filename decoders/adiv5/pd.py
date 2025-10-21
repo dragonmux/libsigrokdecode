@@ -22,7 +22,7 @@ from abc import ABCMeta, abstractmethod
 from enum import Enum, unique, auto
 from typing import Literal
 
-from .registers import Register, ADIv5DPSelect, ADIv5DPID
+from .registers import Register, ADIv5DPSelect, ADIv5DPID, ADIv5DPTargetID
 
 __all__ = ['Decoder']
 
@@ -215,7 +215,7 @@ class ADIv5DP:
 		self.rdbuff = 0
 		self.dpidr = ADIv5DPID()
 		self.dlcr = 0
-		self.targetid = 0
+		self.targetid = ADIv5DPTargetID()
 		self.targetsel = 0
 		self.dlpidr = 0
 		self.eventstat = 0
@@ -241,7 +241,8 @@ class ADIv5DP:
 				case 'DLCR':
 					self.dlcr = transaction.data
 				case 'TARGETID':
-					self.targetid = transaction.data
+					self.targetid.changeValue(transaction.data)
+					value = self.targetid
 				case 'TARGETSEL':
 					self.targetsel = transaction.data
 				case 'DLPIDR':

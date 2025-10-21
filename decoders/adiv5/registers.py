@@ -50,8 +50,17 @@ class ADIv5DPID(Register):
 		minDP = ' Min-DP' if self.isMinDP else ''
 		return f'{vendor} DPv{version}{minDP}'
 
-class ADIv5DPTargetID:
-	pass
+class ADIv5DPTargetID(Register):
+	def __init__(self):
+		self.value = 0
+
+	def changeValue(self, targetID: int):
+		self.value = targetID
+
+	def __str__(self):
+		vendor = JEP106((self.value & 0xf00) | ((self.value & 0xfe) >> 1))
+		partNumber = (self.value >> 12) & 0xffff
+		return f'{vendor} MPN {partNumber:#03x}'
 
 class ADIv5DPSelect(Register):
 	'''Internal representation of the state of the DP SELECT register'''
