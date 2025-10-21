@@ -22,6 +22,8 @@ from abc import ABCMeta, abstractmethod
 from enum import Enum, unique, auto
 from typing import Literal
 
+from .jep106 import JEP106
+
 __all__ = ['Decoder']
 
 class Annotations:
@@ -228,10 +230,10 @@ class ADIv5DPID(Register):
 		return (self.value & (1 << 16)) != 0
 
 	def __str__(self):
-		vendor = (self.value & 0xf00) | ((self.value & 0xfe) >> 1)
+		vendor = JEP106((self.value & 0xf00) | ((self.value & 0xfe) >> 1))
 		version = (self.value >> 12) & 0xf
 		minDP = ' Min-DP' if self.isMinDP else ''
-		return f'{vendor:03x} DPv{version}{minDP}'
+		return f'{vendor} DPv{version}{minDP}'
 
 class ADIv5DPTargetID:
 	pass
