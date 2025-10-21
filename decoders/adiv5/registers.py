@@ -54,13 +54,17 @@ class ADIv5DPTargetID:
 	pass
 
 class ADIv5DPSelect(Register):
-	'''Internal representation of the state of the DP SELECT register (NB, we only care about the AP selected)'''
+	'''Internal representation of the state of the DP SELECT register'''
 	def __init__(self):
 		self.currentAP = 0
+		self.apBank = 0
+		self.dpBank = 0
 
 	def changeValue(self, select: int):
 		'''Decode a write to the SELECT register to get the new value'''
-		self.currentAP = select >> 24
+		self.currentAP = (select >> 24) & 0xff
+		self.apBank = (select >> 4) & 0xf
+		self.dpBank = select & 0xf
 
 	def __str__(self) -> str:
-		return f'AP{self.currentAP}'
+		return f'Select DP bank {self.dpBank}, AP{self.currentAP} bank {self.apBank}'
