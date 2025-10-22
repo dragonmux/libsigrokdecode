@@ -47,8 +47,9 @@ class ADIv5DPID(Register):
 	def __str__(self):
 		vendor = JEP106((self.value & 0xf00) | ((self.value & 0xfe) >> 1))
 		version = (self.value >> 12) & 0xf
+		revision = (self.value >> 28) & 0xf
 		minDP = ' Min-DP' if self.isMinDP else ''
-		return f'{vendor} DPv{version}{minDP}'
+		return f'{vendor} DPv{version} rev{revision}{minDP}'
 
 class ADIv5DPTargetID(Register):
 	def __init__(self):
