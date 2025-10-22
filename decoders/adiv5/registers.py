@@ -33,6 +33,44 @@ class Register(metaclass = ABCMeta):
 	def __str__(self) -> str:
 		raise NotImplementedError('Register must implement string conversion')
 
+class ADIv5DPAbort(Register):
+	def changeValue(self, abort: int) -> None:
+		self.value = abort
+
+	@property
+	def overrunErrorClear(self):
+		return (self.value & (1 << 4)) != 0
+
+	@property
+	def writeDataErrorClear(self):
+		return (self.value & (1 << 3)) != 0
+
+	@property
+	def stickyErrorClear(self):
+		return (self.value & (1 << 2)) != 0
+
+	@property
+	def stickyCompareClear(self):
+		return (self.value & (1 << 1)) != 0
+
+	@property
+	def apTransactionAbort(self):
+		return (self.value & (1 << 0)) != 0
+
+	def __str__(self) -> str:
+		bits = list[str]()
+		if self.overrunErrorClear:
+			bits.append('Overrun Error')
+		if self.writeDataErrorClear:
+			bits.append('Write Data Error')
+		if self.stickyErrorClear:
+			bits.append('Sticky Error')
+		if self.stickyCompareClear:
+			bits.append('Sticky Compare')
+		if self.apTransactionAbort:
+			bits.append('AP Transaction')
+		return f'Abort: {" | ".join(bits)}'
+
 class ADIv5DPCtrlStat:
 	pass
 
