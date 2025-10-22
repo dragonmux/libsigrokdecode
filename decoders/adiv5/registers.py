@@ -22,6 +22,9 @@ from abc import ABCMeta, abstractmethod
 from .jep106 import JEP106
 
 class Register(metaclass = ABCMeta):
+	def __init__(self):
+		self.value = 0
+
 	@abstractmethod
 	def changeValue(self, value: int) -> None:
 		raise NotImplementedError('Register must implement value updates')
@@ -34,9 +37,6 @@ class ADIv5DPCtrlStat:
 	pass
 
 class ADIv5DPID(Register):
-	def __init__(self):
-		self.value = 0
-
 	def changeValue(self, dpidr: int):
 		self.value = dpidr
 
@@ -52,9 +52,6 @@ class ADIv5DPID(Register):
 		return f'{vendor} DPv{version} rev{revision}{minDP}'
 
 class ADIv5DPTargetID(Register):
-	def __init__(self):
-		self.value = 0
-
 	def changeValue(self, targetID: int):
 		self.value = targetID
 
@@ -63,9 +60,20 @@ class ADIv5DPTargetID(Register):
 		partNumber = (self.value >> 12) & 0xffff
 		return f'{vendor} MPN {partNumber:#03x}'
 
+class ADIv5DPTargetSelect(Register):
+	def changeValue(self, targetSelect: int) -> None:
+		self.value = targetSelect
+
+	def __str__(self) -> str:
+		vendor = JEP106((self.value & 0xf00) | ((self.value & 0xfe) >> 1))
+		partNumber = (self.value >> 12) & 0xffff
+		dp = (self.value >> 28) & 0xf
+		return f'{vendor} MPN {partNumber:#03x} DP{dp}'
+
 class ADIv5DPSelect(Register):
 	'''Internal representation of the state of the DP SELECT register'''
 	def __init__(self):
+		super().__init__()
 		self.currentAP = 0
 		self.apBank = 0
 		self.dpBank = 0
@@ -75,6 +83,7 @@ class ADIv5DPSelect(Register):
 		self.currentAP = (select >> 24) & 0xff
 		self.apBank = (select >> 4) & 0xf
 		self.dpBank = select & 0xf
+		self.value = select
 
 	def __str__(self) -> str:
 		return f'Select DP bank {self.dpBank}, AP{self.currentAP} bank {self.apBank}'
