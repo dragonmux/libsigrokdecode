@@ -71,8 +71,12 @@ class ADIv5DPAbort(Register):
 			bits.append('AP Transaction')
 		return f'Abort: {" | ".join(bits)}'
 
-class ADIv5DPCtrlStat:
-	pass
+class ADIv5DPCtrlStat(Register):
+	def changeValue(self, ctrlStatus: int) -> None:
+		self.value = ctrlStatus
+
+	def __str__(self) -> str:
+		return f'{self.value:#08x}'
 
 class ADIv5DPID(Register):
 	def changeValue(self, dpidr: int):

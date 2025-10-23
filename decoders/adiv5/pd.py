@@ -22,7 +22,9 @@ from abc import ABCMeta, abstractmethod
 from enum import Enum, unique, auto
 from typing import Literal
 
-from .registers import Register, ADIv5DPAbort, ADIv5DPSelect, ADIv5DPID, ADIv5DPTargetID, ADIv5DPTargetSelect
+from .registers import (
+	Register, ADIv5DPAbort, ADIv5DPCtrlStat, ADIv5DPSelect, ADIv5DPID, ADIv5DPTargetID, ADIv5DPTargetSelect
+)
 
 __all__ = ['Decoder']
 
@@ -210,7 +212,7 @@ class ADIv5DP:
 	def __init__(self, decoder: 'Decoder'):
 		self.decoder = decoder
 		self.abort = ADIv5DPAbort()
-		self.ctrlstat = 0
+		self.ctrlStat = ADIv5DPCtrlStat()
 		self.select = ADIv5DPSelect()
 		self.rdbuff = 0
 		self.dpidr = ADIv5DPID()
@@ -230,7 +232,8 @@ class ADIv5DP:
 					self.abort.changeValue(transaction.data)
 					value = self.abort
 				case 'CTRL/STAT':
-					self.ctrlstat = transaction.data
+					self.ctrlStat.changeValue(transaction.data)
+					value = self.ctrlStat
 				case 'SELECT':
 					self.select.changeValue(transaction.data)
 					value = self.select
